@@ -1,0 +1,19 @@
+# Node
+node_modules/
+
+# Build
+dist/
+
+# Environment
+.env
+.env.*
+
+# Vite / cache
+.vite/
+.cache/
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
