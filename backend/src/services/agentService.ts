@@ -8,6 +8,33 @@ import { logger } from "../utils/logger";
 import { openaiStream, openaiChat, AIMessage } from "./openaiService";
 
 class AgentService {
+  // Helper functions for parsing JSON fields from database
+  private parseJsonField(raw: any, fallback: any = {}) {
+    if (!raw) return fallback;
+    if (typeof raw === "object") return raw;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+
+  private parseCapabilities(raw: any) {
+    return this.parseJsonField(raw, []);
+  }
+
+  private parseConfig(raw: any) {
+    return this.parseJsonField(raw, {});
+  }
+
+  private parseMetrics(raw: any) {
+    return this.parseJsonField(raw, {
+      totalInteractions: 0,
+      successRate: 0,
+      avgResponseTime: 0,
+    });
+  }
+
   /**
    * GET ALL AGENTS
    */
