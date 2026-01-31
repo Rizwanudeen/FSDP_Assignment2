@@ -1,0 +1,59 @@
+datasource db {
+  provider = "postgresql"
+  // Use DATABASE_URL environment variable (set this to your Supabase connection string)
+  url = env("DATABASE_URL")
+}
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String        @unique
+  name          String
+  password      String
+  agents        Agent[]
+  conversations Conversation[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model Agent {
+  id            String         @id @default(uuid())
+  name          String
+  description   String
+  type          String
+  status        String        @default("ACTIVE")
+  avatar        String?
+  capabilities  String[]
+  configuration Json
+  metrics       Json
+  lastActive    DateTime      @default(now())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  conversations Conversation[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model Conversation {
+  id        String    @id @default(uuid())
+  title     String
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  agentId   String
+  agent     Agent     @relation(fields: [agentId], references: [id])
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  role           String
+  content        String       @db.Text
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}

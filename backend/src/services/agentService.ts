@@ -1,87 +1,204 @@
 // src/services/agentService.ts
-
 import { Response } from "express";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { db, supabase } from "../config/database.js";
-import { logger } from "../utils/logger.js";
-
-// OpenAI streaming
-import { openaiStream } from "./openaiService.js";
-
-// (Python services unused but kept for compatibility)
-import {
-  runModularSearch,
-  runAeroModelSuggestions,
-} from "./pythonService.js";
+import { db, supabase, supabaseAdmin } from "../config/database"; 
+import { logger } from "../utils/logger";
+import { openaiStream, openaiChat, AIMessage } from "./openaiService";
 
 class AgentService {
-  // --------------------------
-  // SAFE JSON PARSERS
-  // --------------------------
-
-  private parseJsonField(raw: any, fallback: any = {}) {
-    if (!raw) return fallback;
-    if (typeof raw === "object") return raw;
+  /**
+   * GET ALL AGENTS
+   */
+  getAllAgents = async (userId: string) => {
     try {
-      return JSON.parse(raw);
-    } catch {
-      return fallback;
+      logger.info('📋 Fetching agents for user:', userId);
+      const { data, error } = await supabase
+        .from('agents')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        logger.error('❌ Error fetching agents:', error);
+        throw error;
+      }
+      
+      logger.info('✅ Found', data?.length || 0, 'agents');
+      return data || [];
+    } catch (err: any) {
+      logger.error('❌ getAllAgents exception:', err.message || err);
+      throw err;
     }
-  }
+  };
 
-  private parseCapabilities(raw: any) {
-    return this.parseJsonField(raw, []);
-  }
+  /**
+   * GET AGENT BY ID
+   */
+  getAgentById = async (agentId: string, userId: string) => {
+    const { data, error } = await supabase
+      .from('agents')
+      .select('*')
+      .eq('id', agentId)
+      .eq('user_id', userId)
+      .single();
+    
+    if (error) {
+      logger.error('Error fetching agent:', error);
+      return null;
+    }
+    return data;
+  };
 
-  private parseConfig(raw: any) {
-    return this.parseJsonField(raw, {});
-  }
+  /**
+   * CREATE AGENT
+   */
+  createAgent = async (userId: string, data: any) => {
+    logger.info('Creating agent for user:', userId);
+    
+    // Ensure user exists in public.users table (fixes RLS foreign key issue)
+    try {
+      const { data: existingUser, error: checkError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', userId)
+        .single();
 
-  private parseMetrics(raw: any) {
-    return this.parseJsonField(raw, {
-      totalInteractions: 0,
-      successRate: 0,
-      avgResponseTime: 0,
-    });
-  }
+      if (checkError || !existingUser) {
+        logger.warn('User not in public.users table, attempting to create entry:', userId);
+        
+        // Try to get user from auth.users to get their email
+        const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
+        
+        if (!authError && authUser?.user) {
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: userId,
+              email: authUser.user.email,
+              name: authUser.user.user_metadata?.full_name || authUser.user.email?.split("@")[0] || 'User',
+              password: '', // Empty password since auth is handled by Supabase
+            });
 
-  // ---------------------------------------------------
-  // MAIN CHAT FUNCTION (OpenAI Streaming)
-  // ---------------------------------------------------
+          if (insertError) {
+            logger.warn('Failed to create user entry (might already exist):', insertError.message);
+            // Continue anyway - user might have been created by another request
+          } else {
+            logger.info('✅ User entry created in public.users:', userId);
+          }
+        }
+      }
+    } catch (err: any) {
+      logger.warn('Error ensuring user exists:', err.message);
+      // Continue anyway - agent creation might still work
+    }
+    
+    const { data: newAgent, error } = await supabase
+      .from('agents')
+      .insert({ 
+        name: data.name,
+        description: data.description,
+        type: data.type,
+        user_id: userId,
+        configuration: data.configuration || {"system_prompt": "You are a helpful assistant.", "model": "gpt-4o-mini"},
+        metrics: { totalInteractions: 0, successRate: 0, avgResponseTime: 0 },
+        status: data.status || 'ACTIVE',
+        capabilities: data.capabilities || []
+      })
+      .select()
+      .single();
 
-  async chatWithAgent(
+    if (error) {
+      logger.error('Agent creation error details:', error);
+      throw error;
+    }
+    return newAgent;
+  };
+
+  /**
+   * UPDATE AGENT
+   */
+  updateAgent = async (agentId: string, userId: string, updateData: any) => {
+    // Convert camelCase to snake_case for Supabase
+    const snakeCaseData: any = {};
+    
+    if (updateData.name !== undefined) snakeCaseData.name = updateData.name;
+    if (updateData.description !== undefined) snakeCaseData.description = updateData.description;
+    if (updateData.type !== undefined) snakeCaseData.type = updateData.type;
+    if (updateData.status !== undefined) snakeCaseData.status = updateData.status;
+    if (updateData.avatar !== undefined) snakeCaseData.avatar = updateData.avatar;
+    if (updateData.capabilities !== undefined) snakeCaseData.capabilities = updateData.capabilities;
+    if (updateData.configuration !== undefined) snakeCaseData.configuration = updateData.configuration;
+    if (updateData.metrics !== undefined) snakeCaseData.metrics = updateData.metrics;
+    
+    snakeCaseData.updated_at = new Date().toISOString();
+
+    const { data: updated, error } = await supabase
+      .from('agents')
+      .update(snakeCaseData)
+      .eq('id', agentId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      logger.error('Update agent error:', error);
+      throw error;
+    }
+    return updated;
+  };
+
+  /**
+   * DELETE AGENT
+   */
+  deleteAgent = async (agentId: string, userId: string) => {
+    const { error } = await supabase
+      .from('agents')
+      .delete()
+      .eq('id', agentId)
+      .eq('user_id', userId);
+
+    if (error) return null;
+    return { id: agentId };
+  };
+
+  /**
+   * TEST AGENT (Non-streaming)
+   */
+  testAgent = async (agentId: string, userId: string, message: string) => {
+    const agent = await this.getAgentById(agentId, userId);
+    if (!agent) throw new Error("Unauthorized or Agent not found");
+
+    // Use snake_case for system_prompt to match the DB schema
+    const messages: AIMessage[] = [
+      { role: "system", content: agent.configuration?.system_prompt || "You are a helpful assistant." },
+      { role: "user", content: message }
+    ];
+
+    const result = await openaiChat(agent.configuration?.model || "gpt-4o-mini", messages);
+    return { ...result, agentName: agent.name };
+  };
+
+  /**
+   * CHAT WITH AGENT (Streaming)
+   */
+  chatWithAgent = async (
     agentId: string,
     userId: string,
     message: string,
     conversationId: string | null,
     res: Response,
     skipUserMessage?: boolean
-  ) {
-    logger.info("chatWithAgent START", { agentId, userId, conversationId, skipUserMessage });
-
+  ) => {
     try {
-      // 1️⃣ Load agent
       const agent = await this.getAgentById(agentId, userId);
       if (!agent) throw new Error("Agent not found");
 
-      const config = this.parseConfig(agent.configuration);
+      const systemPrompt = agent.configuration?.system_prompt || "You are a helpful assistant.";
+      const model = agent.configuration?.model || "gpt-4o-mini";
 
-      const systemPrompt =
-        config.systemPrompt || "You are a helpful AI research assistant.";
-
-      // IMPORTANT: OpenAI model names — no prefixes
-      const model = config.model || "gpt-4o-mini";
-
-      const temperature =
-        typeof config.temperature === "number"
-          ? config.temperature
-          : 0.7;
-
-      // 2️⃣ Validate or create conversation
       let convId = conversationId;
-
       if (convId) {
         // Check if conversation exists (don't filter by user_id for shared agents)
         const { data: conv, error } = await supabase
@@ -198,22 +315,17 @@ class AgentService {
       // 6️⃣ Build OpenAI messages format
       const messagesForModel = [
         { role: "system", content: systemPrompt },
-        ...history,
+        ...history.map(m => ({ role: m.role as any, content: m.content })),
         { role: "user", content: message },
       ];
 
-      // 7️⃣ Stream OpenAI response
       let assistantText = "";
       const startTime = Date.now();
-
       const stream = openaiStream(model, messagesForModel);
 
       for await (const token of stream) {
         assistantText += token;
-
-        res.write(
-          `event: token\ndata: ${JSON.stringify({ token })}\n\n`
-        );
+        res.write(`event: token\ndata: ${JSON.stringify({ token })}\n\n`);
       }
 
       if (!assistantText.trim()) {
@@ -233,10 +345,7 @@ class AgentService {
       
       if (saveError) logger.error('Failed to save assistant message', saveError);
 
-      // 9️⃣ End SSE
-      res.write(
-        `event: done\ndata: ${JSON.stringify({ conversationId: convId })}\n\n`
-      );
+      res.write(`event: done\ndata: ${JSON.stringify({ conversationId: convId })}\n\n`);
       res.end();
 
       // 10. UPDATE METRICS
@@ -266,18 +375,10 @@ class AgentService {
 
     } catch (error) {
       logger.error("chatWithAgent ERROR", error);
-
-      if (!res.headersSent) {
-        return res.status(500).json({
-          success: false,
-          error: "Chat failed",
-        });
-      }
-
-      res.write(`event: error\ndata: "Chat failed, please retry."\n\n`);
+      if (!res.headersSent) res.status(500).json({ success: false, error: "Chat failed" });
       res.end();
     }
-  }
+  };
 
   // ---------------------------------------------------
   // UPDATE AGENT METRICS
@@ -348,7 +449,6 @@ class AgentService {
     
     let interactionMap: { [key: string]: number } = {};
     let successRateMap: { [key: string]: number } = {};
-    let avgResponseTimeMap: { [key: string]: number } = {};
     
     if (agentIds.length > 0) {
       // Get interaction counts from messages
@@ -384,12 +484,6 @@ class AgentService {
         const total = positive + negative;
         successRateMap[agentId] = total > 0 ? Math.round((positive / total) * 100) : 0;
       });
-
-      // Calculate avgResponseTime from stored metrics in database
-      rows?.forEach((agent: any) => {
-        const parsedMetrics = this.parseMetrics(agent.metrics);
-        avgResponseTimeMap[agent.id] = parsedMetrics.avgResponseTime || 0;
-      });
     }
 
     return rows?.map((a: any) => {
@@ -403,7 +497,6 @@ class AgentService {
           ...parsedMetrics,
           totalInteractions: interactionMap[a.id] ?? 0,
           successRate: successRateMap[a.id] ?? 0,
-          avgResponseTime: avgResponseTimeMap[a.id] ?? 0,
         },
       };
     }) || [];

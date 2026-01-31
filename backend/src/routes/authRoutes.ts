@@ -23,74 +23,65 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Check if email already exists in users table
-    const { data: existingByEmail } = await supabase
-      .from('users')
-      .select('id, email')
-      .eq('email', email)
-      .maybeSingle();
-
-    if (existingByEmail) {
-      return res.status(400).json({
-        success: false,
-        error: "Email already registered. Please login instead.",
-      });
-    }
-
-    // Create user in Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    /**
+     * Supabase Auth handles:
+     * 1. Checking if user exists
+     * 2. Hashing the password securely
+     * 3. Creating the user in the auth.users table
+     */
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          full_name: name || email.split("@")[0],
+        },
+      },
     });
 
-    if (authError) {
-      logger.error("Supabase Auth error:", authError);
-      return res.status(400).json({
+    if (error) {
+      // Supabase returns a 422 or 400 if user exists or password is too weak
+      return res.status(error.status || 400).json({
         success: false,
-        error: authError.message,
+        error: error.message,
       });
     }
 
-    if (!authData.user) {
-      return res.status(500).json({
-        success: false,
-        error: "Failed to create auth user",
-      });
+    const user = data.user;
+    const session = data.session;
+
+    // Create user record in public.users table
+    if (user?.id) {
+      try {
+        const { error: dbError } = await supabase
+          .from('users')
+          .insert({
+            id: user.id,
+            email: user.email,
+            name: name || user.user_metadata?.full_name || email.split("@")[0],
+            password: "", // Empty password since auth is handled by Supabase
+          });
+
+        if (dbError) {
+          logger.error("Failed to create user in public.users:", dbError);
+          // Continue anyway - user might already exist
+        } else {
+          logger.info("✅ User created in public.users:", user.id);
+        }
+      } catch (err) {
+        logger.error("Error creating user record:", err);
+      }
     }
-
-    // Insert into users table with the Supabase Auth user ID
-    const { data: inserted, error: insertError } = await supabase
-      .from('users')
-      .insert({
-        id: authData.user.id,
-        email,
-        name: name || email.split("@")[0],
-      })
-      .select('id, email, name')
-      .single();
-
-    if (insertError) {
-      logger.error("Failed to insert user into users table:", insertError);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to create user account. Please try again.",
-      });
-    }
-
-    logger.info("✅ User created with ID:", authData.user.id);
-
-    // Get the user data from users table
-    const { data: userData } = await supabase
-      .from('users')
-      .select('id, email, name')
-      .eq('id', authData.user.id)
-      .single();
 
     res.status(201).json({
       success: true,
-      data: { 
-        user: userData || { id: authData.user.id, email, name: name || email.split("@")[0] },
-        session: authData.session
+      data: {
+        user: {
+          id: user?.id,
+          email: user?.email,
+          name: user?.user_metadata?.full_name || name,
+        },
+        token: session?.access_token,
       },
       message: "User registered successfully",
     });
@@ -104,8 +95,6 @@ router.post("/register", async (req, res) => {
  * POST /api/auth/login
  */
 router.post("/login", async (req, res) => {
-  console.log("🔥 LOGIN ENDPOINT HIT");
-  console.log("BODY:", req.body);
   try {
     const { email, password } = req.body;
 
@@ -117,42 +106,53 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    console.log("📡 Querying database for user:", email);
-    const { data: rows, error: queryError } = await supabase
-      .from('users')
-      .select('id, email, password, name')
-      .ilike('email', email)
-      .limit(1);
+    // Supabase handles password verification internally
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    console.log("📊 Query result:", { rows: rows?.length, error: queryError });
-
-    if (queryError) throw queryError;
-
-    if (!rows || rows.length === 0) {
-      console.log("❌ User not found");
+    if (error) {
+      // Error 400/401: Invalid credentials
       return res.status(401).json({
         success: false,
         error: "Invalid email or password",
       });
     }
 
-    const user = rows[0];
-    console.log("👤 User found:", user.email);
-    console.log("🔐 Comparing passwords...");
-    const valid = await bcrypt.compare(password, user.password);
-    console.log("✅ Password valid:", valid);
+    const user = data.user;
+    const session = data.session;
 
-    if (!valid) {
-      console.log("❌ Invalid password");
-      return res.status(401).json({
-        success: false,
-        error: "Invalid email or password",
-      });
+    // Ensure user exists in public.users table
+    if (user?.id) {
+      try {
+        const { data: existingUser, error: checkError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('id', user.id)
+          .single();
+
+        if (checkError || !existingUser) {
+          // User doesn't exist in public.users, create them
+          logger.info("Creating user in public.users for login:", user.id);
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: user.id,
+              email: user.email,
+              name: user.user_metadata?.full_name || user.email?.split("@")[0],
+              password: "", // Empty password since auth is handled by Supabase
+            });
+
+          if (insertError) {
+            logger.error("Failed to create user on login:", insertError);
+            // Continue anyway
+          }
+        }
+      } catch (err) {
+        logger.error("Error checking/creating user on login:", err);
+      }
     }
-
-    console.log("🎫 Generating token...");
-    const token = generateToken(user.id, user.email);
-    console.log("✅ Token generated, sending response");
 
     res.json({
       success: true,
@@ -160,9 +160,9 @@ router.post("/login", async (req, res) => {
         user: {
           id: user.id,
           email: user.email,
-          name: user.name,
+          name: user.user_metadata?.full_name || user.email?.split("@")[0],
         },
-        token,
+        token: session.access_token,
       },
       message: "Login successful",
     });
@@ -174,6 +174,79 @@ router.post("/login", async (req, res) => {
       success: false,
       error: "Failed to login",
     });
+  }
+});
+
+/**
+ * POST /api/auth/sync-users-from-auth
+ * Emergency endpoint: Sync all users from auth.users to public.users
+ * Use this if you have orphaned auth users without public.users records
+ */
+router.post("/sync-users-from-auth", async (req, res) => {
+  try {
+    // Get all users from auth.users (only accessible with service role)
+    const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+
+    if (authError) {
+      logger.error("Failed to list auth users:", authError);
+      return res.status(500).json({ success: false, error: "Failed to fetch auth users" });
+    }
+
+    if (!authUsers?.users) {
+      return res.json({ success: true, synced: 0, message: "No auth users found" });
+    }
+
+    logger.info(`Found ${authUsers.users.length} auth users, syncing to public.users...`);
+
+    let synced = 0;
+    let skipped = 0;
+
+    for (const authUser of authUsers.users) {
+      try {
+        // Check if user exists in public.users
+        const { data: existingUser } = await supabase
+          .from('users')
+          .select('id')
+          .eq('id', authUser.id)
+          .single();
+
+        if (!existingUser) {
+          // Insert user into public.users
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: authUser.id,
+              email: authUser.email,
+              name: authUser.user_metadata?.full_name || authUser.email?.split("@")[0],
+              password: "",
+            });
+
+          if (insertError) {
+            logger.warn(`Failed to sync user ${authUser.id}:`, insertError);
+            skipped++;
+          } else {
+            synced++;
+            logger.info(`✅ Synced user: ${authUser.id}`);
+          }
+        } else {
+          skipped++;
+        }
+      } catch (err) {
+        logger.error(`Error syncing user ${authUser.id}:`, err);
+        skipped++;
+      }
+    }
+
+    res.json({
+      success: true,
+      synced,
+      skipped,
+      total: authUsers.users.length,
+      message: `Synced ${synced} users, ${skipped} already existed`,
+    });
+  } catch (error) {
+    logger.error("Sync users error:", error);
+    res.status(500).json({ success: false, error: "Failed to sync users" });
   }
 });
 

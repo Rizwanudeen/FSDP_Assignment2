@@ -2,6 +2,7 @@
 import express from "express";
 import { authenticateToken } from "../middleware/auth";
 import { runModularSearch, runAeroModelSuggestions } from "../services/pythonService";
+import { openaiStream } from "../services/openaiService";
 
 const router = express.Router();
 
@@ -74,7 +75,20 @@ Summarise the above into:
 - Short reasoning.
 `;
 
-  const summary = await openrouterReasoning(prompt);
+  const summary = await (async () => {
+    try {
+      let summaryText = "";
+      for await (const token of openaiStream("gpt-4o-mini", [
+        { role: "system", content: "You are a research analyst. Summarize concisely." },
+        { role: "user", content: prompt }
+      ])) {
+        summaryText += token;
+      }
+      return summaryText;
+    } catch (err) {
+      return "Summary generation failed";
+    }
+  })();
 
   return res.json({
     success: true,

@@ -8,7 +8,7 @@ class AgentController {
   /**
    * GET /api/agents
    */
-  async getAll(req: Request, res: Response) {
+  getAll = async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId)
@@ -23,12 +23,12 @@ class AgentController {
         .status(500)
         .json({ success: false, error: "Failed to fetch agents" });
     }
-  }
+  };
 
   /**
    * GET /api/agents/:id
    */
-  async getById(req: Request, res: Response) {
+  getById = async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId)
@@ -48,12 +48,12 @@ class AgentController {
         .status(500)
         .json({ success: false, error: "Failed to fetch agent" });
     }
-  }
+  };
 
   /**
    * POST /api/agents
    */
-  async create(req: Request, res: Response) {
+  create = async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId)
@@ -79,16 +79,25 @@ class AgentController {
         });
     } catch (error) {
       logger.error("Create agent error:", error);
+      logger.error("Create agent error details:", {
+        message: (error as any).message,
+        code: (error as any).code,
+        details: (error as any).details,
+      });
       res
         .status(500)
-        .json({ success: false, error: "Failed to create agent" });
+        .json({ 
+          success: false, 
+          error: "Failed to create agent",
+          details: (error as any).message || "Unknown error"
+        });
     }
-  }
+  };
 
   /**
    * PUT /api/agents/:id
    */
-  async update(req: Request, res: Response) {
+  update = async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId)
@@ -116,12 +125,12 @@ class AgentController {
         .status(500)
         .json({ success: false, error: "Failed to update agent" });
     }
-  }
+  };
 
   /**
    * DELETE /api/agents/:id
    */
-  async delete(req: Request, res: Response) {
+  delete = async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId)
@@ -141,12 +150,12 @@ class AgentController {
         .status(500)
         .json({ success: false, error: "Failed to delete agent" });
     }
-  }
+  };
 
   /**
    * POST /api/agents/:id/test
    */
-  async test(req: Request, res: Response) {
+  test = async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId)
@@ -169,12 +178,12 @@ class AgentController {
         .status(500)
         .json({ success: false, error: "Failed to test agent" });
     }
-  }
+  };
 
   /**
    * POST /api/agents/:id/chat (SSE Streaming)
    */
-  async chat(req: Request, res: Response) {
+  chat = async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId)
@@ -209,7 +218,7 @@ class AgentController {
           .json({ success: false, error: "Failed to chat with agent" });
       }
     }
-  }
+  };
 }
 
 export const agentController = new AgentController();

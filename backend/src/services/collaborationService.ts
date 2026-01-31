@@ -13,6 +13,38 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
 
+/**
+ * Compute confidence score from token log probabilities
+ * Uses geometric mean of token probabilities converted to percentage
+ * @param logprobs - Token log probabilities from OpenAI response
+ * @returns Confidence score 0-100, or null if unavailable
+ */
+function computeConfidenceFromLogprobs(logprobs: any): number | null {
+  if (!logprobs || !logprobs.content || logprobs.content.length === 0) {
+    return null;
+  }
+
+  // Extract token logprobs
+  const tokenLogprobs = logprobs.content
+    .map((token: any) => token.logprob)
+    .filter((lp: number) => lp !== null && lp !== undefined);
+
+  if (tokenLogprobs.length === 0) {
+    return null;
+  }
+
+  // Convert logprobs to probabilities and compute geometric mean
+  // Geometric mean = exp(mean(log probabilities))
+  const sumLogprobs = tokenLogprobs.reduce((sum: number, lp: number) => sum + lp, 0);
+  const meanLogprob = sumLogprobs / tokenLogprobs.length;
+  const geometricMean = Math.exp(meanLogprob);
+  
+  // Convert to percentage (0-100)
+  const confidenceScore = geometricMean * 100;
+  
+  return Math.min(100, Math.max(0, confidenceScore));
+}
+
 interface CollaborativeTask {
   id: string;
   teamId: string;
@@ -164,18 +196,38 @@ The primary agent should coordinate and synthesize results. Other agents should 
 
 Respond with ONLY valid JSON array, no other text.`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: 1000,
-      });
+      let response;
+      try {
+        response = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+          max_tokens: 1000,
+        });
+      } catch (error: any) {
+        // Check if error is model-related
+        const isModelError = error?.status === 404 || 
+                            error?.code === 'model_not_found' ||
+                            error?.message?.toLowerCase().includes('model') ||
+                            error?.error?.code === 'model_not_found';
+        
+        if (isModelError) {
+          logger.warn(`Model "gpt-4o-mini" not available, trying fallback to gpt-3.5-turbo`);
+          // Retry with gpt-3.5-turbo as ultimate fallback
+          response = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.7,
+            max_tokens: 1000,
+          });
+        } else {
+          throw error;
+        }
+      }
 
       let content = response.choices[0].message.content || "[]";
-      
       // Strip markdown code blocks if present
-      content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      
+      content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
       const subtasks = JSON.parse(content);
 
       // Validate and ensure all agents have tasks
@@ -275,31 +327,30 @@ Respond with ONLY valid JSON array, no other text.`;
 
       if (attachments && attachments.length > 0) {
         for (const att of attachments) {
-          // Use snake_case column names from Supabase
-          const isImage = att.file_type?.startsWith('image/');
+          const isImage = att.fileType?.startsWith('image/');
           
           if (isImage) {
             try {
-              // file_path from DB is already absolute
-              const fullPath = att.file_path;
+              // filePath from DB is already absolute, don't join with cwd
+              const fullPath = att.filePath;
               logger.info(`Attempting to read image from: ${fullPath}`);
               if (fs.existsSync(fullPath)) {
                 const buffer = fs.readFileSync(fullPath);
                 const base64 = buffer.toString('base64');
                 imageAttachments.push({
-                  filename: att.original_file_name,
+                  filename: att.originalFileName,
                   base64,
-                  mimeType: att.file_type
+                  mimeType: att.fileType
                 });
-                logger.info(`Successfully loaded image: ${att.original_file_name}`);
+                logger.info(`Successfully loaded image: ${att.originalFileName}`);
               } else {
                 logger.warn(`Image file not found: ${fullPath}`);
               }
             } catch (err) {
-              logger.warn(`Failed to read image ${att.original_file_name}:`, err);
+              logger.warn(`Failed to read image ${att.originalFileName}:`, err);
             }
           } else {
-            documentAttachments.push(`${att.original_file_name} (${att.file_type})`);
+            documentAttachments.push(`${att.originalFileName} (${att.fileType})`);
           }
         }
       }
@@ -357,7 +408,7 @@ Respond with ONLY valid JSON array, no other text.`;
         if (updateAssignError) throw updateAssignError;
 
         // Execute agent's subtask
-        const result = await this.executeAgentSubtask(
+        const { result, confidence } = await this.executeAgentSubtask(
           assignment,
           task.description,
           contributions,
@@ -450,7 +501,7 @@ Respond with ONLY valid JSON array, no other text.`;
     imageAttachments: Array<{ filename: string; base64: string; mimeType: string }>,
     documentAttachments: string[],
     sendEvent: (event: string, data: any) => void
-  ): Promise<string> {
+  ): Promise<{ result: string; confidence: number | null }> {
     try {
       const config = JSON.parse(assignment.configuration || "{}");
       const model = config.model || "gpt-4o-mini";
@@ -503,24 +554,54 @@ Provide a focused, actionable response for your specific subtask. Be concise and
         { role: "user" as const, content: userContent as any }
       ];
 
-      // Use the same openaiStream function that handles model normalization
-      const stream = openaiStream(model, messages);
-
-      let fullResponse = "";
-      for await (const content of stream) {
-        if (content) {
-          fullResponse += content;
-          sendEvent("agent_stream", {
-            agentId: assignment.agentId,
-            content,
+      // Request logprobs for confidence computation
+      let response;
+      try {
+        response = await openai.chat.completions.create({
+          model,
+          messages,
+          temperature: 0.7,
+          stream: false,
+          logprobs: true,
+          top_logprobs: 1,
+        });
+      } catch (error: any) {
+        // Check if error is model-related
+        const isModelError = error?.status === 404 || 
+                            error?.code === 'model_not_found' ||
+                            error?.message?.toLowerCase().includes('model') ||
+                            error?.error?.code === 'model_not_found';
+        
+        if (isModelError && model !== 'gpt-4o-mini') {
+          logger.warn(`Model "${model}" not found or unavailable, falling back to gpt-4o-mini`);
+          // Retry with default model
+          response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages,
+            temperature: 0.7,
+            stream: false,
+            logprobs: true,
+            top_logprobs: 1,
           });
+        } else {
+          // Re-throw if not a model error or already using default
+          throw error;
         }
       }
 
-      return fullResponse.trim();
+      const fullResponse = response.choices[0].message.content || "";
+      const confidence = computeConfidenceFromLogprobs(response.choices[0].logprobs);
+
+      // Stream the response for UI feedback
+      sendEvent("agent_stream", {
+        agentId: assignment.agentId,
+        content: fullResponse,
+      });
+
+      return { result: fullResponse.trim(), confidence };
     } catch (error) {
       logger.error("Execute agent subtask error:", error);
-      return `Error executing subtask: ${error}`;
+      return { result: `Error executing subtask: ${error}`, confidence: null };
     }
   }
 
@@ -547,12 +628,34 @@ Synthesize these contributions into a comprehensive final result that:
 
 Provide the final synthesized result:`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.5,
-        max_tokens: 1500,
-      });
+      let response;
+      try {
+        response = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.5,
+          max_tokens: 1500,
+        });
+      } catch (error: any) {
+        // Check if error is model-related
+        const isModelError = error?.status === 404 || 
+                            error?.code === 'model_not_found' ||
+                            error?.message?.toLowerCase().includes('model') ||
+                            error?.error?.code === 'model_not_found';
+        
+        if (isModelError) {
+          logger.warn(`Model "gpt-4o-mini" not available, trying fallback to gpt-3.5-turbo`);
+          // Retry with gpt-3.5-turbo as ultimate fallback
+          response = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.5,
+            max_tokens: 1500,
+          });
+        } else {
+          throw error;
+        }
+      }
 
       return response.choices[0].message.content || "Synthesis failed";
     } catch (error) {
@@ -706,41 +809,30 @@ Provide the final synthesized result:`;
     const isOwner = team.user_id === userId;
 
     if (!isOwner) {
-      // Check for shared team access in resource_access table
-      const { data: teamAccess } = await supabase
-        .from('resource_access')
+      // Check for shared access
+      const { data: ownerAgents } = await supabase
+        .from('agents')
         .select('id')
-        .eq('resource_type', 'team')
-        .eq('resource_id', teamId)
-        .eq('user_id', userId)
-        .maybeSingle();
+        .eq('user_id', team.user_id);
 
-      if (!teamAccess) {
-        // Also check for shared agent access (old logic)
-        const { data: ownerAgents } = await supabase
-          .from('agents')
+      if (ownerAgents && ownerAgents.length > 0) {
+        const agentIds = ownerAgents.map(a => a.id);
+        
+        const { data: sharedAccess } = await supabase
+          .from('share_requests')
           .select('id')
-          .eq('user_id', team.user_id);
+          .eq('resource_type', 'agent')
+          .in('resource_id', agentIds)
+          .eq('requester_user_id', userId)
+          .eq('status', 'approved')
+          .limit(1)
+          .maybeSingle();
 
-        if (ownerAgents && ownerAgents.length > 0) {
-          const agentIds = ownerAgents.map(a => a.id);
-          
-          const { data: sharedAccess } = await supabase
-            .from('share_requests')
-            .select('id')
-            .eq('resource_type', 'agent')
-            .in('resource_id', agentIds)
-            .eq('requester_user_id', userId)
-            .eq('status', 'approved')
-            .limit(1)
-            .maybeSingle();
-
-          if (!sharedAccess) {
-            throw new Error("Team not found");
-          }
-        } else {
+        if (!sharedAccess) {
           throw new Error("Team not found");
         }
+      } else {
+        throw new Error("Team not found");
       }
     }
   }

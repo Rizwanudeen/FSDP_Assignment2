@@ -110,10 +110,6 @@ export const teamService = {
     return response.data.data;
   },
 
-  async deleteTeam(teamId: string): Promise<void> {
-    await api.delete(`/teams/${teamId}`);
-  },
-
   // Team Members
   async addMember(
     teamId: string,

@@ -1,16 +1,29 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Bot, Plus, LogOut, Search, Filter, Wand2, MessageSquare, BarChart3, Users, Globe, Inbox } from 'lucide-react';
+import { Bot, Plus, LogOut, Search, Filter, Wand2, MessageSquare, Users, Globe, Inbox, Moon, Sun, HelpCircle } from 'lucide-react';
 import api from '../services/api';
 import { Agent } from '../types';
 import AgentCard from '../components/AgentCard';
 import AgentModal from '../components/AgentModal';
-import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import QuickActions from '../components/QuickActions';
 import { shareService } from '../services/shareService';
+import { useTutorial } from '../context/TutorialContext';
 
 export default function Dashboard() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(
+    (localStorage.getItem('theme') as 'light' | 'dark') || 'light'
+  );
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
@@ -18,9 +31,10 @@ export default function Dashboard() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const { startTutorial } = useTutorial();
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const userName = user.name || (user.email ? user.email.split('@')[0] : 'User');
 
   // Fetch agents
   const { data: agents = [], isLoading } = useQuery({
@@ -74,9 +88,15 @@ export default function Dashboard() {
     setEditingAgent(null);
   };
 
+  const handleFeedback = () => {
+    setIsFeedbackOpen(true);
+  };
+
+
   // Filter agents
   const filteredAgents = agents.filter((agent) => {
-    const matchesSearch = agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    const matchesSearch =
+      agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       agent.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = filterType === 'all' || agent.type === filterType.toUpperCase();
     const matchesStatus = filterStatus === 'all' || agent.status === filterStatus.toUpperCase();
@@ -84,9 +104,9 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       {/* Header */}
-      <div className="bg-white border-b">
+      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center py-4 gap-3">
             <div className="flex items-center gap-3">
@@ -94,11 +114,24 @@ export default function Dashboard() {
                 <Bot className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-lg sm:text-xl font-bold">AeroIntel</h1>
-                <p className="text-xs sm:text-sm text-gray-600">Welcome, {userName}</p>
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100">AeroIntel</h1>
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300">
+                  Welcome, {user.name || 'User'}
+                </p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+              {/* Theme toggle */}
+              <button
+                id="theme-toggle-btn"
+                onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                title="Toggle theme"
+              >
+                {theme === 'light' ? <Moon className="h-4 w-4 text-gray-700 dark:text-gray-200" /> : <Sun className="h-4 w-4 text-gray-700 dark:text-gray-200" />}
+              </button>
+
+              {/* Other buttons */}
               <button
                 onClick={() => navigate('/search')}
                 className="flex items-center justify-center gap-2 border border-green-300 bg-green-50 text-green-700 px-3 sm:px-4 py-2 rounded-lg hover:bg-green-100 transition flex-1 sm:flex-none text-sm"
@@ -117,21 +150,23 @@ export default function Dashboard() {
               </button>
               <button
                 onClick={() => navigate('/teams')}
-                className="flex items-center justify-center gap-2 border border-purple-300 bg-purple-50 text-purple-700 px-3 sm:px-4 py-2 rounded-lg hover:bg-purple-100 transition flex-1 sm:flex-none text-sm"
+                className="flex items-center justify-center gap-2 border border-purple-300 bg-purple-50 dark:bg-purple-600 dark:border-purple-700 text-purple-700 dark:text-purple-100 px-3 sm:px-4 py-2 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-700 transition flex-1 sm:flex-none text-sm"
               >
                 <Users className="h-4 w-4" />
                 <span className="hidden sm:inline">Teams</span>
                 <span className="sm:hidden">Teams</span>
               </button>
               <button
+                id="test-agents-btn"
                 onClick={() => navigate('/conversation')}
-                className="flex items-center justify-center gap-2 border border-gray-300 px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-50 transition flex-1 sm:flex-none text-sm"
+                className="flex items-center justify-center gap-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition flex-1 sm:flex-none text-sm"
               >
                 <MessageSquare className="h-4 w-4" />
                 <span className="hidden sm:inline">Test Agents</span>
                 <span className="sm:hidden">Test</span>
               </button>
               <button
+                id="agent-builder-btn"
                 onClick={() => navigate('/builder')}
                 className="flex items-center justify-center gap-2 bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-blue-700 transition flex-1 sm:flex-none text-sm"
               >
@@ -139,8 +174,17 @@ export default function Dashboard() {
                 Agent Builder
               </button>
               <button
+                id="help-btn"
+                onClick={startTutorial}
+                className="flex items-center gap-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition"
+                title="View tutorial"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </button>
+              <button
+                id="logout-btn"
                 onClick={handleLogout}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+                className="flex items-center gap-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition"
               >
                 <LogOut className="h-4 w-4" />
               </button>
@@ -156,27 +200,29 @@ export default function Dashboard() {
           onNewAgent={() => navigate('/builder')}
           onTestAgent={() => navigate('/conversation')}
           onViewAnalytics={() => navigate('/analytics')}
+          onFeedback={() => navigate('/feedback')}
+          onProfile={() => navigate('/profile')}
         />
 
         {/* Search and Filters */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center">
+        <div id="search-filter-section" className="mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center">
           <div className="flex-1 min-w-full sm:min-w-[300px] relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-300" />
             <input
               type="text"
               placeholder="Search agents..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-300"
             />
           </div>
 
           <div className="flex gap-2 items-center">
-            <Filter className="h-4 w-4 text-gray-500" />
+            <Filter className="h-4 w-4 text-gray-500 dark:text-gray-300" />
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             >
               <option value="all">All Types</option>
               <option value="conversational">Conversational</option>
@@ -188,7 +234,7 @@ export default function Dashboard() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             >
               <option value="all">All Status</option>
               <option value="active">Active</option>
@@ -197,8 +243,9 @@ export default function Dashboard() {
             </select>
 
             <button
+              id="new-agent-btn"
               onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50"
+              className="flex items-center gap-2 border border-gray-300 dark:border-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
             >
               <Plus className="h-4 w-4" />
               Quick Create
@@ -207,37 +254,32 @@ export default function Dashboard() {
         </div>
 
         {/* Results Count */}
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
           Showing {filteredAgents.length} of {agents.length} agents
         </p>
 
         {/* Agents Grid */}
         {isLoading ? (
           <div className="text-center py-12">
-            <div className="text-xl">Loading agents...</div>
+            <div className="text-xl text-gray-900 dark:text-gray-100">Loading agents...</div>
           </div>
         ) : filteredAgents.length === 0 ? (
           <div className="text-center py-12">
-            <Bot className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No agents found</h3>
-            <p className="text-gray-600 mb-4">Get started by creating your first agent</p>
+            <Bot className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No agents found</h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-4">Get started by creating your first agent</p>
             <button
               onClick={() => navigate('/builder')}
-              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
             >
               <Plus className="h-4 w-4" />
               Create Agent
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div id="agent-cards-container" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredAgents.map((agent) => (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-              />
+              <AgentCard key={agent.id} agent={agent} onEdit={handleEdit} onDelete={handleDelete} />
             ))}
           </div>
         )}
@@ -285,12 +327,7 @@ export default function Dashboard() {
       </div>
 
       {/* Agent Modal */}
-      {isModalOpen && (
-        <AgentModal
-          agent={editingAgent}
-          onClose={handleModalClose}
-        />
-      )}
+      {isModalOpen && <AgentModal agent={editingAgent} onClose={handleModalClose} />}
     </div>
   );
 }

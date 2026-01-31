@@ -1,4 +1,5 @@
 import api from './api';
+import { ensureValidToken } from './tokenRefresh';
 
 type Agent = any;
 
@@ -47,7 +48,7 @@ async function chatStream(
 ) {
 	try {
 		// Use fetch so we can stream the response body
-		const token = localStorage.getItem('token');
+		const token = await ensureValidToken();
 
 		const base = ((import.meta as any).env?.VITE_API_URL as string) || '/api';
 		const res = await fetch(`${base}/agents/${id}/chat`, {

@@ -3,10 +3,14 @@ import { db, supabase } from '../config/database';
 import { logger } from '../utils/logger';
 
 class ConversationController {
+    /**
+     * Fetch the most recent conversation and its messages
+     */
     async getLatestConversation(req: Request, res: Response) {
         try {
             const agentId = req.params.agentId;
             const userId = (req as any).user.id;
+
             if (!userId) {
                 return res.status(401).send('Unauthorized');
             }
@@ -89,10 +93,13 @@ class ConversationController {
             logger.error('Error fetching latest conversation:', error);
             res.status(500).json({ success: false, error: 'Server error' });
         }
-    }
+    };
 
+    /**
+     * Record feedback (Like/Dislike) and update Agent success metrics
+     */
     async recordFeedback(req: Request, res: Response) {
-        const { messageId, feedback } = req.body; // feedback is 'like' or 'dislike'
+        const { messageId, feedback } = req.body; 
         const userId = (req as any).user.id;
 
         if (!messageId || !feedback) {
@@ -118,7 +125,7 @@ class ConversationController {
         return res.status(404).json({ success: false, error: `Message with ID '${messageId}' not found.` });
       }            const currentFeedback = messages[0].feedback || 0;
 
-            // 2. Determine the new feedback value
+            // 2. Determine new feedback value (Toggle logic)
             const feedbackValue = feedback === 'like' ? 1 : -1;
             const newFeedback = currentFeedback === feedbackValue ? 0 : feedbackValue;
 
@@ -198,7 +205,7 @@ class ConversationController {
             logger.error("Failed to record feedback", error);
             res.status(500).json({ success: false, error: "Failed to record feedback." });
         }
-    }
+    };
 }
 
 export const conversationController = new ConversationController();

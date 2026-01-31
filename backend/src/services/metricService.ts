@@ -19,7 +19,8 @@ export const metricService = {
     if (error) throw error;
   },
 
-  /** Ensures a conversation exists */
+  /** * Ensures a conversation exists 
+   */
   async ensureConversation(agentId: string, userId: string): Promise<string> {
     const { data: rows, error: fetchError } = await supabase
       .from('conversations')
@@ -47,7 +48,8 @@ export const metricService = {
     return result.id;
   },
 
-  /** Update metrics safely */
+  /** * Update metrics safely 
+   */
   async updateMetrics(agentId: string, data: {
     success: boolean;
     responseTimeMs: number;

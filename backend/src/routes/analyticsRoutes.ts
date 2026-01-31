@@ -1,31 +1,14 @@
 // src/routes/analyticsRoutes.ts
 
 import express from "express";
-import { db, supabase } from "../config/database";
-import { authenticateToken } from "../middleware/auth";
+import { supabase } from "../config/database.js"; // Updated import
+import { authenticateToken } from "../middleware/auth.js";
+import { logger } from "../utils/logger.js";
 
 const router = express.Router();
 
 /**
  * GET /api/analytics
- *
- * Returns:
- *  Overview:
- *   - totalAgents
- *   - activeAgents
- *   - totalConversations
- *   - avgResponseTime
- *   - avgSuccessRate
- *
- *  agentPerformance[]:
- *   - id
- *   - name
- *   - conversations
- *   - interactions
- *   - successRate
- *   - responseTime
- *   - tokensUsed
- *   - llmCostUSD
  */
 router.get("/", authenticateToken, async (req, res) => {
   try {
@@ -35,57 +18,44 @@ router.get("/", authenticateToken, async (req, res) => {
     }
 
     // ================================================
-    // 🔥 1. FETCH AGENTS
+    // 1. FETCH AGENTS
     // ================================================
-    const { data: agents, error: agentsError } = await supabase
+    const { data: agents, error: agentsErr } = await supabase
       .from('agents')
       .select('*')
       .eq('user_id', userId)
       .eq('is_deleted', false);
 
-    if (agentsError) throw agentsError;
+    if (agentsErr) throw agentsErr;
 
-    if (!agents.length) {
+    if (!agents || agents.length === 0) {
       return res.json({
         success: true,
         data: {
-          overview: {
-            totalAgents: 0,
-            activeAgents: 0,
-            totalConversations: 0,
-            avgResponseTime: 0,
-            avgSuccessRate: 0,
-          },
+          overview: { totalAgents: 0, activeAgents: 0, totalConversations: 0, avgResponseTime: 0, avgSuccessRate: 0 },
           agentPerformance: [],
         },
       });
     }
 
     // ================================================
-    // 🔥 2. FETCH CONVERSATION COUNTS (super fast)
+    // 2. FETCH CONVERSATION COUNTS
     // ================================================
-    const agentIds = agents?.map(a => a.id) || [];
-    const { data: conversationCounts, error: countError } = await supabase
+    // We fetch agent_ids for all conversations belonging to this user
+    const { data: convData, error: convErr } = await supabase
       .from('conversations')
       .select('agent_id')
-      .in('agent_id', agentIds);
+      .eq('user_id', userId);
 
-    if (countError) throw countError;
+    if (convErr) throw convErr;
 
-    const countsByAgent = conversationCounts?.reduce((acc: any, conv: any) => {
-      acc[conv.agent_id] = (acc[conv.agent_id] || 0) + 1;
-      return acc;
-    }, {}) || {};
+    const countMap: Record<string, number> = {};
+    convData?.forEach(c => {
+      countMap[c.agent_id] = (countMap[c.agent_id] || 0) + 1;
+    });
 
-    const conversationCountsFormatted = Object.entries(countsByAgent).map(([agentId, count]) => ({
-      agentId,
-      count
-    }));
-
-    // Convert to dictionary: { agentId: count }
-    const countMap = Object.fromEntries(
-      conversationCountsFormatted.map((c: any) => [c.agentId, c.count])
-    );
+    // Get agent IDs for filtering
+    const agentIds = agents.map(a => a.id);
 
     // ================================================
     // 🔥 3. CALCULATE REAL METRICS FROM DATABASE
@@ -138,251 +108,161 @@ router.get("/", authenticateToken, async (req, res) => {
     // ================================================
     // 🔥 4. BUILD ENRICHED AGENT LIST
     // ================================================
-    const enrichedAgents = (agents || []).map((a) => {
-      let metrics: any = {};
+    let totalInteractions = 0;
+    let sumResponseTime = 0;
+    let activeAgentsCount = 0;
 
-      try {
-        // Handle both JSON string and object formats
-        if (typeof a.metrics === 'string') {
-          metrics = JSON.parse(a.metrics);
-        } else if (typeof a.metrics === 'object' && a.metrics !== null) {
-          metrics = a.metrics;
-        }
-      } catch {
-        metrics = {};
-      }
+    const agentPerformance = agents.map((a) => {
+      // Postgres JSONB is already an object, no JSON.parse needed
+      const m = a.metrics || {};
+      const conversations = countMap[a.id] || 0;
+
+      if (a.status === "ACTIVE") activeAgentsCount++;
+      sumResponseTime += (m.avgResponseTime || 0);
+      totalInteractions += (m.totalInteractions || 0);
 
       return {
-        ...a,
-        metrics: {
-          totalInteractions: interactionsByAgent[a.id] || 0, // Real count from DB
-          successRate: successRateByAgent[a.id] ?? 0, // Real-time success rate
-          avgResponseTime: metrics.avgResponseTime || 0,
-          totalTokens: metrics.totalTokens || 0,
-          llmCostUSD: metrics.llmCostUSD || 0,
-        },
-        conversations: countMap[a.id] || 0,
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        interactions: m.totalInteractions || 0,
+        successRate: m.successRate || 0,
+        responseTime: m.avgResponseTime || 0,
+        conversations: conversations,
+        tokensUsed: m.totalTokens || 0,
+        llmCostUSD: m.llmCostUSD || 0,
       };
     });
 
     // ================================================
-    // 🔥 5. COMPUTE OVERVIEW ANALYTICS
+    // 4. FETCH FEEDBACK STATS (Messages join Conversations)
     // ================================================
-    const totalAgents = enrichedAgents.length;
-    const activeAgents = enrichedAgents.filter((a) => a.status === "ACTIVE")
-      .length;
-    const totalConversations = enrichedAgents.reduce(
-      (sum, a) => sum + a.conversations,
-      0
-    );
-
-    const avgResponseTime =
-      enrichedAgents.reduce(
-        (sum, a) => sum + (a.metrics.avgResponseTime || 0),
-        0
-      ) / (totalAgents || 1);
-
-    // Calculate success rate from actual feedback data
-    const { data: allMessages, error: msgError } = await supabase
+    const { data: feedbackData, error: feedErr } = await supabase
       .from('messages')
-      .select('feedback, conversations!inner(agent_id)')
-      .in('conversations.agent_id', agentIds)
-      .not('feedback', 'is', null);
+      .select('feedback, conversations!inner(user_id)')
+      .eq('conversations.user_id', userId)
+      .neq('feedback', 0); // Only count 1 or -1
 
-    if (msgError) throw msgError;
+    if (feedErr) throw feedErr;
 
-    const feedbackStats = [{
-      positive: allMessages?.filter(m => m.feedback === 1).length || 0,
-      negative: allMessages?.filter(m => m.feedback === -1).length || 0
-    }];
-
-    const totalFeedback = (feedbackStats[0]?.positive || 0) + (feedbackStats[0]?.negative || 0);
-    const avgSuccessRate = totalFeedback > 0 
-      ? Math.round(((feedbackStats[0]?.positive || 0) / totalFeedback) * 100)
-      : 0;
+    const positive = feedbackData?.filter(m => m.feedback === 1).length || 0;
+    const totalFeedback = feedbackData?.length || 0;
+    const avgSuccessRate = totalFeedback > 0 ? Math.round((positive / totalFeedback) * 100) : 0;
 
     // ================================================
-    // 🔥 6. AGENT PERFORMANCE TABLE
+    // 5. TIME-SERIES DATA (Last 7 Days)
     // ================================================
-    const agentPerformance = enrichedAgents.map((agent) => ({
-      id: agent.id,
-      name: agent.name,
-      type: agent.type,
-      interactions: agent.metrics.totalInteractions,
-      successRate: agent.metrics.successRate,
-      responseTime: agent.metrics.avgResponseTime,
-      conversations: agent.conversations,
-      tokensUsed: agent.metrics.totalTokens,
-      llmCostUSD: agent.metrics.llmCostUSD,
-    }));
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // ================================================
-    // 🔥 7. TIME-SERIES DATA FOR CHARTS
-    // ================================================
-    // Get interactions over time (last 7 days)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentMessages, error: recentError } = await supabase
+    const { data: recentMessages, error: msgErr } = await supabase
       .from('messages')
-      .select('created_at, conversations!inner(agent_id)')
-      .in('conversations.agent_id', agentIds)
-      .gte('created_at', sevenDaysAgo);
+      .select('created_at, feedback, conversations!inner(user_id)')
+      .eq('conversations.user_id', userId)
+      .gte('created_at', sevenDaysAgo.toISOString());
 
-    if (recentError) throw recentError;
+    if (msgErr) throw msgErr;
 
-    const interactionsByDate = recentMessages?.reduce((acc: any, msg: any) => {
-      const date = msg.created_at.split('T')[0];
-      acc[date] = (acc[date] || 0) + 1;
-      return acc;
-    }, {}) || {};
+    // Grouping logic in JS (Replacement for SQL GROUP BY DATE)
+    const dailyInteractions: Record<string, number> = {};
+    const dailySuccess: Record<string, { pos: number; tot: number }> = {};
 
-    const interactionsOverTime = Object.entries(interactionsByDate)
-      .map(([date, interactions]) => ({ date, interactions }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    recentMessages?.forEach(m => {
+      const date = new Date(m.created_at).toISOString().split('T')[0];
+      
+      // Interactions trend
+      dailyInteractions[date] = (dailyInteractions[date] || 0) + 1;
 
-    // Get success rate trend (last 7 days)
-    const { data: feedbackMessages, error: feedbackMsgError } = await supabase
-      .from('messages')
-      .select('created_at, feedback, conversations!inner(agent_id)')
-      .in('conversations.agent_id', agentIds)
-      .gte('created_at', sevenDaysAgo)
-      .in('feedback', [1, -1]);
-
-    if (feedbackMsgError) throw feedbackMsgError;
-
-    const feedbackByDate = feedbackMessages?.reduce((acc: any, msg: any) => {
-      const date = msg.created_at.split('T')[0];
-      if (!acc[date]) acc[date] = { positive: 0, total: 0 };
-      if (msg.feedback === 1) acc[date].positive++;
-      acc[date].total++;
-      return acc;
-    }, {}) || {};
-
-    const successRateTrend = Object.entries(feedbackByDate)
-      .map(([date, stats]: [string, any]) => ({
-        date,
-        successRate: Math.round((stats.positive / stats.total) * 100)
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      // Success rate trend
+      if (m.feedback !== 0) {
+        if (!dailySuccess[date]) dailySuccess[date] = { pos: 0, tot: 0 };
+        if (m.feedback === 1) dailySuccess[date].pos++;
+        dailySuccess[date].tot++;
+      }
+    });
 
     // ================================================
-    // 🔥 7. RETURN RESPONSE
+    // 6. RETURN RESPONSE
     // ================================================
     res.json({
       success: true,
       data: {
         overview: {
-          totalAgents,
-          activeAgents,
-          totalConversations,
-          avgResponseTime,
+          totalAgents: agents.length,
+          activeAgents: activeAgentsCount,
+          totalConversations: convData?.length || 0,
+          avgResponseTime: sumResponseTime / (agents.length || 1),
           avgSuccessRate,
         },
         agentPerformance,
-        interactionsOverTime: interactionsOverTime.map(row => ({
-          date: row.date,
-          interactions: row.interactions
-        })),
-        successRateTrend: successRateTrend.map(row => ({
-          date: row.date,
-          successRate: row.successRate
-        })),
+        interactionsOverTime: Object.entries(dailyInteractions).map(([date, count]) => ({
+          date,
+          interactions: count
+        })).sort((a,b) => a.date.localeCompare(b.date)),
+        successRateTrend: Object.entries(dailySuccess).map(([date, stats]) => ({
+          date,
+          successRate: Math.round((stats.pos / stats.tot) * 100)
+        })).sort((a,b) => a.date.localeCompare(b.date)),
       },
     });
 
   } catch (error) {
-    console.error("Analytics Error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch analytics",
-    });
+    logger.error("Analytics Global Error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch analytics" });
   }
 });
 
 /**
  * GET /api/analytics/agent/:agentId
- *
- * Fetches detailed analytics for a single agent.
  */
 router.get("/agent/:agentId", authenticateToken, async (req, res) => {
   try {
     const userId = req.user?.id;
     const { agentId } = req.params;
 
-    if (!userId) {
-      return res.status(401).json({ success: false, error: "Unauthorized" });
-    }
+    if (!userId) return res.status(401).json({ success: false, error: "Unauthorized" });
 
-    // ================================================
-    // 🔥 1. FETCH AGENT
-    // ================================================
-    const { data: agent, error: agentError } = await supabase
+    // 1. Fetch Agent
+    const { data: agent, error: agentErr } = await supabase
       .from('agents')
       .select('*')
       .eq('id', agentId)
       .eq('user_id', userId)
-      .eq('is_deleted', false);
+      .eq('is_deleted', false)
+      .single();
 
-    if (agentError) throw agentError;
+    if (agentErr || !agent) return res.status(404).json({ success: false, error: "Agent not found" });
 
-    if (!agent.length) {
-      return res.status(404).json({ success: false, error: "Agent not found" });
-    }
-
-    // ================================================
-    // 🔥 2. FETCH CONVERSATIONS & METRICS
-    // ================================================
-    const { data: conversations, error: convError } = await supabase
+    // 2. Fetch Conversations for this specific agent
+    const { data: conversations, error: convErr } = await supabase
       .from('conversations')
       .select('*')
       .eq('agent_id', agentId);
 
-    if (convError) throw convError;
+    if (convErr) throw convErr;
 
-    let metrics: any = {};
-    try {
-      // Handle both JSON string and object formats
-      if (typeof agent[0].metrics === 'string') {
-        metrics = JSON.parse(agent[0].metrics);
-      } else if (typeof agent[0].metrics === 'object' && agent[0].metrics !== null) {
-        metrics = agent[0].metrics;
-      }
-    } catch {
-      metrics = {};
-    }
-
-    const enrichedAgent = {
-      ...agent[0],
-      metrics: {
-        totalInteractions: metrics.totalInteractions || 0,
-        totalTokens: metrics.totalTokens || 0,
-        avgResponseTime: metrics.avgResponseTime || 0,
-        successRate: metrics.successRate || 0,
-        llmCost: metrics.llmCost || 0,
-      },
-      conversations: conversations.length,
-    };
-
-    // ================================================
-    // 🔥 3. CALCULATE OVERVIEW
-    // ================================================
-    const overview = {
-      totalAgents: 1,
-      activeAgents: 1,
-      totalConversations: conversations.length,
-      avgResponseTime: enrichedAgent.metrics.avgResponseTime,
-      avgSuccessRate: enrichedAgent.metrics.successRate,
-    };
-
+    const m = agent.metrics || {};
+    
     res.json({
       success: true,
       data: {
-        overview,
-        agentPerformance: [enrichedAgent],
-        conversations, // Also pass conversation details
+        overview: {
+          totalAgents: 1,
+          activeAgents: agent.status === 'ACTIVE' ? 1 : 0,
+          totalConversations: conversations.length,
+          avgResponseTime: m.avgResponseTime || 0,
+          avgSuccessRate: m.successRate || 0,
+        },
+        agentPerformance: [{
+          ...agent,
+          metrics: m,
+          conversations: conversations.length
+        }],
+        conversations,
       },
     });
   } catch (error) {
-    console.error(`Error fetching analytics for agent ${req.params.agentId}:`, error);
+    logger.error(`Error fetching individual agent analytics:`, error);
     res.status(500).json({ success: false, error: "Internal Server Error" });
   }
 });
@@ -459,8 +339,8 @@ router.get("/teams", authenticateToken, async (req, res) => {
     const activeTeams = teams.filter(t => {
       // Consider team active if it has tasks created in the last 30 days
       const hasRecentTasks = (tasks || []).some((task: any) => 
-        task.team_id === t.id && 
-        new Date(task.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        task.teamId === t.id && 
+        new Date(task.createdAt) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       );
       return hasRecentTasks;
     }).length;
@@ -470,14 +350,14 @@ router.get("/teams", authenticateToken, async (req, res) => {
     
     // Calculate average completion time for completed tasks
     const completedTasksWithTime = tasks.filter(t => 
-      t.status === 'COMPLETED' && t.completed_at && t.created_at
+      t.status === 'COMPLETED' && t.completedAt && t.createdAt
     );
     
     let avgCompletionTime = 0;
     if (completedTasksWithTime.length > 0) {
       const totalTime = completedTasksWithTime.reduce((sum, task) => {
-        const created = new Date(task.created_at).getTime();
-        const completed = new Date(task.completed_at).getTime();
+        const created = new Date(task.createdAt).getTime();
+        const completed = new Date(task.completedAt).getTime();
         return sum + (completed - created);
       }, 0);
       avgCompletionTime = Math.round(totalTime / completedTasksWithTime.length / (1000 * 60)); // Convert to minutes

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management System</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Dashboard View -->
+    <div id="dashboardView" class="view active">
+        <div class="container">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-left">
+                    <div class="logo">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="header-text">
+                        <h1>Agent Management System</h1>
+                        <p>Create, manage, and monitor your AI agents</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-outline" onclick="app.showConversation()">
+                        <i class="fas fa-message"></i>
+                        Test Agents
+                    </button>
+                    <button class="btn btn-primary" onclick="app.showBuilder()">
+                        <i class="fas fa-wand-magic-sparkles"></i>
+                        Agent Builder
+                    </button>
+                </div>
+            </div>
+
+            <!-- Analytics Dashboard -->
+            <div id="analyticsSection"></div>
+
+            <!-- Quick Actions -->
+            <div class="quick-actions">
+                <div class="quick-action-card" onclick="app.showBuilder()">
+                    <i class="fas fa-plus"></i>
+                    <h3>Create Agent</h3>
+                    <p>Build a new AI agent</p>
+                </div>
+                <div class="quick-action-card" onclick="app.showConversation()">
+                    <i class="fas fa-comments"></i>
+                    <h3>Test Agents</h3>
+                    <p>Try your agents</p>
+                </div>
+                <div class="quick-action-card" onclick="app.showAnalytics()">
+                    <i class="fas fa-chart-line"></i>
+                    <h3>View Analytics</h3>
+                    <p>Check performance</p>
+                </div>
+            </div>
+
+            <!-- Search and Filters -->
+            <div class="search-filters">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="Search agents..." oninput="app.filterAgents()">
+                </div>
+                <div class="filters">
+                    <i class="fas fa-filter"></i>
+                    <select id="filterType" onchange="app.filterAgents()">
+                        <option value="all">All Types</option>
+                        <option value="conversational">Conversational</option>
+                        <option value="analytical">Analytical</option>
+                        <option value="creative">Creative</option>
+                        <option value="automation">Automation</option>
+                    </select>
+                    <select id="filterStatus" onchange="app.filterAgents()">
+                        <option value="all">All Status</option>
+                        <option value="active">Active</option>
+                        <option value="paused">Paused</option>
+                        <option value="training">Training</option>
+                        <option value="error">Error</option>
+                    </select>
+                    <button class="btn btn-outline" onclick="app.openQuickCreateModal()">
+                        <i class="fas fa-plus"></i>
+                        Quick Create
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results Count -->
+            <div class="results-count">
+                <p id="resultsText">Showing agents</p>
+            </div>
+
+            <!-- Agents Grid -->
+            <div id="agentsGrid" class="agents-grid"></div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="empty-state" style="display: none;">
+                <i class="fas fa-robot"></i>
+                <h3>No agents found</h3>
+                <p>Try adjusting your filters or create a new agent</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Details View -->
+    <div id="detailsView" class="view">
+        <div class="container">
+            <button class="btn btn-outline" onclick="app.showDashboard()">
+                <i class="fas fa-arrow-left"></i>
+                Back to Dashboard
+            </button>
+            <div id="agentDetails"></div>
+        </div>
+    </div>
+
+    <!-- Agent Builder View -->
+    <div id="builderView" class="view">
+        <div class="container">
+            <div id="builderContent"></div>
+        </div>
+    </div>
+
+    <!-- Analytics View -->
+    <div id="analyticsView" class="view">
+        <div class="container">
+            <div id="analyticsContent"></div>
+        </div>
+    </div>
+
+    <!-- Conversation View -->
+    <div id="conversationView" class="view">
+        <div class="container">
+            <div id="conversationContent"></div>
+        </div>
+    </div>
+
+    <!-- Agent Form Modal -->
+    <div id="agentFormModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Create New Agent</h2>
+                <button class="close-btn" onclick="app.closeFormModal()">&times;</button>
+            </div>
+            <form id="agentForm" onsubmit="app.saveAgent(event)">
+                <div class="form-group">
+                    <label>Agent Name *</label>
+                    <input type="text" id="agentName" required>
+                </div>
+                <div class="form-group">
+                    <label>Description *</label>
+                    <textarea id="agentDescription" rows="3" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Type *</label>
+                    <select id="agentType" required>
+                        <option value="conversational">Conversational</option>
+                        <option value="analytical">Analytical</option>
+                        <option value="creative">Creative</option>
+                        <option value="automation">Automation</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Avatar URL</label>
+                    <input type="url" id="agentAvatar">
+                </div>
+                <div class="form-group">
+                    <label>Capabilities (comma-separated)</label>
+                    <input type="text" id="agentCapabilities" placeholder="e.g., Customer Service, Email Support">
+                </div>
+                <div class="form-group">
+                    <label>Model</label>
+                    <select id="agentModel">
+                        <option value="GPT-4">GPT-4</option>
+                        <option value="GPT-3.5">GPT-3.5</option>
+                        <option value="Claude-3">Claude-3</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="agentStatus">
+                        <option value="active">Active</option>
+                        <option value="paused">Paused</option>
+                        <option value="training">Training</option>
+                        <option value="error">Error</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>System Prompt</label>
+                    <textarea id="agentPrompt" rows="4"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="app.closeFormModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Agent</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
