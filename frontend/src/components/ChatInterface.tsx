@@ -463,14 +463,6 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 							allAgents={allAgents.map(a => ({ id: a.id, name: a.name }))}
 							questionText={messages.find(m => m.role === 'user' && messages.indexOf(m) < messages.indexOf(msg))?.content || 'User Query'}
 						/>
-						<SaveResponseButton
-							messageId={msg.id}
-							messageContent={msg.content}
-							currentAgentId={agentId}
-							currentConversationId={currentConversationId || ''}
-							allAgents={allAgents.map(a => ({ id: a.id, name: a.name }))}
-							questionText={messages.find(m => m.role === 'user' && messages.indexOf(m) < messages.indexOf(msg))?.content || 'User Query'}
-						/>
 					</div>
 				)}
 			</div>
