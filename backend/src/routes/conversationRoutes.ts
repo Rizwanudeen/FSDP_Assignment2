@@ -1,9 +1,10 @@
 // src/routes/conversationRoutes.ts
 
 import express from "express";
-import { authenticateToken } from "../middleware/auth";
-import { db, supabase } from "../config/database";
-import { conversationController } from "../controllers/conversationController";
+import { authenticateToken } from "../middleware/auth.js";
+import { supabase } from "../config/database.js"; // Updated to Supabase client
+import { conversationController } from "../controllers/conversationController.js";
+import { logger } from "../utils/logger.js";
 import crypto from "crypto";
 
 const router = express.Router();
@@ -12,13 +13,12 @@ router.use(authenticateToken);
 
 /**
  * GET /api/conversations
- * Get all conversations for user with the latest message + agent info
+ * Get all conversations for user with agent info and the latest message
  */
 router.get("/", async (req, res) => {
   try {
     const userId = req.user?.id;
 
-    // Return empty list early
     if (!userId) {
       return res.status(401).json({ success: false, error: "Unauthorized" });
     }
@@ -109,40 +109,43 @@ router.get("/", async (req, res) => {
 
     res.json({ success: true, data: conversations });
   } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, error: "Failed to fetch conversations" });
+    logger.error("Fetch conversations error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch conversations" });
   }
 });
 
 /**
+ * GET /api/conversations/latest/:agentId
+ * Get the latest conversation for a specific agent (supports shared access)
+ * MUST be before /:id route to prevent :id matching "latest"
+ */
+router.get("/latest/:agentId", conversationController.getLatestConversation.bind(conversationController));
+
+/**
  * GET /api/conversations/:id
- * Get one conversation with all messages
+ * Get one specific conversation with all its messages
  */
 router.get("/:id", async (req, res) => {
   try {
     const userId = req.user?.id;
     const { id } = req.params;
 
-    if (!userId) {
-      return res.status(401).json({ success: false, error: "Unauthorized" });
-    }
+    if (!userId) return res.status(401).json({ success: false, error: "Unauthorized" });
 
-    // Get conversation
-    const { data: convRows, error: convError } = await supabase
+    // Fetch conversation and agent in one go
+    const { data: conv, error: convErr } = await supabase
       .from('conversations')
-      .select('*')
-      .eq('id', id);
+      .select(`
+        *,
+        agent:agents (id, name, avatar)
+      `)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
 
-    if (convError) throw convError;
-
-    if (!convRows.length) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Conversation not found" });
+    if (convErr || !conv) {
+      return res.status(404).json({ success: false, error: "Conversation not found" });
     }
-
-    const conv = convRows[0];
 
     // Check if user owns the agent or has shared access
     const { data: agent, error: agentError } = await supabase
@@ -213,12 +216,6 @@ router.get("/:id", async (req, res) => {
 });
 
 /**
- * GET /api/conversations/latest/:agentId
- * Get the latest conversation for a specific agent (supports shared access)
- */
-router.get("/latest/:agentId", conversationController.getLatestConversation.bind(conversationController));
-
-/**
  * DELETE /api/conversations/:id
  */
 router.delete("/:id", async (req, res) => {
@@ -262,15 +259,13 @@ router.delete("/:id", async (req, res) => {
 
     res.json({ success: true, message: "Conversation deleted" });
   } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, error: "Failed to delete conversation" });
+    logger.error("Delete conversation error:", error);
+    res.status(500).json({ success: false, error: "Failed to delete conversation" });
   }
 });
 
 /**
  * POST /api/conversations/feedback
- * Record feedback for a message
  */
 router.post("/feedback", authenticateToken, (req, res) => {
   conversationController.recordFeedback(req, res);
@@ -278,19 +273,19 @@ router.post("/feedback", authenticateToken, (req, res) => {
 
 /**
  * POST /api/conversations/message
- * Create a message and return its ID (for file uploads before chat)
+ * Create a new message in a conversation
  */
 router.post("/message", async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ success: false, error: "Unauthorized" });
     }
 
-    const { agentId, conversationId, message, role } = req.body;
+    const { agentId, conversationId, message, role = "user" } = req.body;
 
     if (!agentId || !message) {
-      return res.status(400).json({ error: "agentId and message are required" });
+      return res.status(400).json({ success: false, error: "agentId and message are required" });
     }
 
     // Get agent and verify access
@@ -378,12 +373,15 @@ router.post("/message", async (req, res) => {
 
     res.json({
       success: true,
-      messageId,
+      messageId: messageId,
       conversationId: convId,
+      role: role || "user",
+      content: message,
+      created_at: new Date().toISOString()
     });
-  } catch (error: any) {
-    console.error("Create message error:", error);
-    res.status(500).json({ error: error.message || "Failed to create message" });
+  } catch (error) {
+    logger.error("Create message error:", error);
+    res.status(500).json({ success: false, error: "Failed to create message" });
   }
 });
 

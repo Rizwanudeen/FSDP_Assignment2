@@ -16,6 +16,7 @@ import { shareRoutes } from "./routes/shareRoutes";
 
 import { errorHandler } from "./middleware/errorHandler";
 import { connectDatabase } from "./config/database";
+import { initializeDatabase } from "./config/initDatabase";
 import { logger } from "./utils/logger";
 
 // Load environment variables
@@ -41,6 +42,7 @@ app.use(
       process.env.FRONTEND_URL || "http://localhost:5173",
       "http://localhost:5174",
       "http://localhost:5173",
+      "http://localhost:5175",
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
@@ -96,7 +98,7 @@ app.use(
 // ======================================================
 
 if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev", { stream: logger.stream }));
+  app.use(morgan("dev"));
 }
 
 // ======================================================
@@ -134,6 +136,47 @@ app.get("/api", (req, res) => {
 // 📌 MAIN API ROUTES
 // ======================================================
 
+// Debug endpoint - no auth required
+app.get("/api/debug/health", (req, res) => {
+  logger.info("🏥 Health check request");
+  res.json({ 
+    success: true, 
+    message: "Backend is running",
+    time: new Date().toISOString(),
+    nodeEnv: process.env.NODE_ENV,
+    supabaseUrl: process.env.SUPABASE_URL ? "✅ Configured" : "❌ Missing",
+    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? "✅ Configured" : "❌ Missing",
+  });
+});
+
+// Debug endpoint - test auth
+app.get("/api/debug/test-token", async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  logger.info("🔍 Test token endpoint called");
+  logger.info("Token:", token ? token.substring(0, 30) + "..." : "NO TOKEN");
+  
+  if (!token) {
+    return res.json({ success: false, error: "No token provided" });
+  }
+
+  // Try to verify with JWT
+  try {
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    res.json({
+      tokenProvided: token.substring(0, 30) + "...",
+      decoded,
+      success: true,
+    });
+  } catch (err: any) {
+    res.json({
+      tokenProvided: token.substring(0, 30) + "...",
+      error: err.message,
+      success: false,
+    });
+  }
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/agents", agentRoutes);
 app.use("/api/conversations", conversationRoutes);
@@ -168,6 +211,7 @@ app.use(errorHandler);
 async function startServer() {
   try {
     await connectDatabase();
+    await initializeDatabase();
 
     const server = app.listen(PORT, () => {
       logger.info(`------------------------------------------------`);

@@ -1,12 +1,20 @@
-import { Plus, MessageSquare, BarChart3 } from 'lucide-react';
+import { Plus, MessageSquare, BarChart3, MessageCircle, User } from 'lucide-react';
 
 type Props = {
   onNewAgent: () => void;
   onTestAgent: () => void;
   onViewAnalytics: () => void;
+  onFeedback: () => void;
+  onProfile: () => void; // <-- new
 };
 
-export default function QuickActions({ onNewAgent, onTestAgent, onViewAnalytics }: Props) {
+export default function QuickActions({
+  onNewAgent,
+  onTestAgent,
+  onViewAnalytics,
+  onFeedback,
+  onProfile, // <-- new
+}: Props) {
   const actions = [
     {
       name: 'Create New Agent',
@@ -29,22 +37,41 @@ export default function QuickActions({ onNewAgent, onTestAgent, onViewAnalytics 
       onClick: onViewAnalytics,
       color: 'bg-purple-600',
     },
+    {
+      name: 'Give Feedback',
+      description: 'Report issues or suggest improvements',
+      icon: MessageCircle,
+      onClick: onFeedback,
+      color: 'bg-orange-600',
+    },
+    {
+      name: 'Profile',
+      description: 'View and edit your profile settings',
+      icon: User,
+      onClick: onProfile,
+      color: 'bg-teal-600', // choose a new color so it stands out
+    },
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6 mb-6 sm:mb-8">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
       {actions.map((action) => (
         <button
           key={action.name}
+          id={`${action.name.toLowerCase().replace(/\s+/g, '-')}-btn`}
           onClick={action.onClick}
-          className="flex items-center gap-3 sm:gap-4 p-4 sm:p-6 bg-white rounded-lg shadow border hover:border-blue-300 transition"
+          className="flex items-center gap-4 p-5 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 transition"
         >
-          <div className={`p-2 sm:p-3 rounded-lg ${action.color} text-white flex-shrink-0`}>
-            <action.icon className="h-5 w-5 sm:h-6 sm:w-6" />
+          <div className={`p-3 rounded-lg ${action.color} text-white flex-shrink-0`}>
+            <action.icon className="h-6 w-6" />
           </div>
-          <div className="text-left min-w-0">
-            <h3 className="font-medium text-gray-900 text-sm sm:text-base">{action.name}</h3>
-            <p className="text-xs sm:text-sm text-gray-600 truncate">{action.description}</p>
+          <div className="text-left">
+            <h3 className="font-medium text-gray-900 dark:text-gray-100">
+              {action.name}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              {action.description}
+            </p>
           </div>
         </button>
       ))}

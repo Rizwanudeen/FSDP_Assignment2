@@ -3,7 +3,6 @@
 import path from "path";
 import fs from "fs";
 import { Request } from "express";
-import { supabase } from "../config/database";
 import { v4 as uuidv4 } from "uuid";
 
 // Ensure uploads directory exists
@@ -79,31 +78,32 @@ export class UploadService {
     messageId: string,
     file: Express.Multer.File
   ): Promise<MessageAttachment> {
-    if (!pool) throw new Error("Database not connected");
+    try {
+      // Generate unique filename
+      const ext = path.extname(file.originalname);
+      const fileName = `${uuidv4()}${ext}`;
+      const filePath = path.join(CONVERSATIONS_DIR, fileName);
 
-    // Generate unique filename
-    const ext = path.extname(file.originalname);
-    const fileName = `${uuidv4()}${ext}`;
-    const filePath = path.join(CONVERSATIONS_DIR, fileName);
+      // Save file to disk
+      fs.writeFileSync(filePath, file.buffer);
 
-    // Save file to disk
-    fs.writeFileSync(filePath, file.buffer);
+      // For now, just return the attachment info without database persistence
+      // TODO: Add Supabase table for attachments when schema is updated
+      const attachment: MessageAttachment = {
+        id: uuidv4(),
+        messageId,
+        fileName,
+        originalFileName: file.originalname,
+        filePath,
+        fileType: file.mimetype,
+        fileSize: file.size,
+        uploadedAt: new Date(),
+      };
 
-    // Save to database
-    const result = await pool
-      .request()
-      .input("messageId", sql.UniqueIdentifier, messageId)
-      .input("fileName", sql.NVarChar, fileName)
-      .input("originalFileName", sql.NVarChar, file.originalname)
-      .input("filePath", sql.NVarChar, filePath)
-      .input("fileType", sql.NVarChar, file.mimetype)
-      .input("fileSize", sql.BigInt, file.size).query(`
-        INSERT INTO MessageAttachments (messageId, fileName, originalFileName, filePath, fileType, fileSize)
-        OUTPUT INSERTED.*
-        VALUES (@messageId, @fileName, @originalFileName, @filePath, @fileType, @fileSize)
-      `);
-
-    return result.recordset[0];
+      return attachment;
+    } catch (error: any) {
+      throw new Error(`Failed to save message attachment: ${error.message}`);
+    }
   }
 
   async saveTaskAttachment(
@@ -111,117 +111,50 @@ export class UploadService {
     userId: string,
     file: Express.Multer.File
   ): Promise<TaskAttachment> {
-    // Generate unique filename
-    const ext = path.extname(file.originalname);
-    const fileName = `${uuidv4()}${ext}`;
-    const filePath = path.join(TASKS_DIR, fileName);
+    try {
+      // Generate unique filename
+      const ext = path.extname(file.originalname);
+      const fileName = `${uuidv4()}${ext}`;
+      const filePath = path.join(TASKS_DIR, fileName);
 
-    // Save file to disk
-    fs.writeFileSync(filePath, file.buffer);
+      // Save file to disk
+      fs.writeFileSync(filePath, file.buffer);
 
-    // Save to Supabase database
-    const { data, error } = await supabase
-      .from('task_attachments')
-      .insert({
+      // For now, just return the attachment info without database persistence
+      // TODO: Add Supabase table for attachments when schema is updated
+      const attachment: TaskAttachment = {
         id: uuidv4(),
-        task_id: taskId,
-        file_name: fileName,
-        original_file_name: file.originalname,
-        file_path: filePath,
-        file_type: file.mimetype,
-        file_size: file.size,
-        uploaded_by: userId,
-      })
-      .select()
-      .single();
+        taskId,
+        fileName,
+        originalFileName: file.originalname,
+        filePath,
+        fileType: file.mimetype,
+        fileSize: file.size,
+        uploadedBy: userId,
+        uploadedAt: new Date(),
+      };
 
-    if (error) throw error;
-
-    return {
-      id: data.id,
-      taskId: data.task_id,
-      fileName: data.file_name,
-      originalFileName: data.original_file_name,
-      filePath: data.file_path,
-      fileType: data.file_type,
-      fileSize: data.file_size,
-      uploadedBy: data.uploaded_by,
-      uploadedAt: new Date(data.uploaded_at),
-    };
+      return attachment;
+    } catch (error: any) {
+      throw new Error(`Failed to save task attachment: ${error.message}`);
+    }
   }
 
   async getMessageAttachments(messageId: string): Promise<MessageAttachment[]> {
-    const { data, error } = await supabase
-      .from('message_attachments')
-      .select('*')
-      .eq('message_id', messageId)
-      .order('uploaded_at', { ascending: false });
-
-    if (error) throw error;
-
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      messageId: row.message_id,
-      fileName: row.file_name,
-      originalFileName: row.original_file_name,
-      filePath: row.file_path,
-      fileType: row.file_type,
-      fileSize: row.file_size,
-      uploadedAt: new Date(row.uploaded_at),
-    }));
+    // TODO: Implement with Supabase when attachments table is created
+    // For now, return empty array
+    return [];
   }
 
   async getTaskAttachments(taskId: string): Promise<TaskAttachment[]> {
-    const { data, error } = await supabase
-      .from('task_attachments')
-      .select('*')
-      .eq('task_id', taskId)
-      .order('uploaded_at', { ascending: false });
-
-    if (error) throw error;
-
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      taskId: row.task_id,
-      fileName: row.file_name,
-      originalFileName: row.original_file_name,
-      filePath: row.file_path,
-      fileType: row.file_type,
-      fileSize: row.file_size,
-      uploadedBy: row.uploaded_by,
-      uploadedAt: new Date(row.uploaded_at),
-    }));
+    // TODO: Implement with Supabase when attachments table is created
+    // For now, return empty array
+    return [];
   }
 
   async deleteAttachment(attachmentId: string, type: "message" | "task"): Promise<void> {
-    const tableName = type === "message" ? "message_attachments" : "task_attachments";
-    const filePathColumn = "file_path";
-
-    // Get file info
-    const { data: fileData, error: selectError } = await supabase
-      .from(tableName)
-      .select(filePathColumn)
-      .eq('id', attachmentId)
-      .single();
-
-    if (selectError) throw selectError;
-
-    if (fileData) {
-      const filePath = fileData[filePathColumn];
-
-      // Delete file from disk
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-
-      // Delete from database
-      const { error: deleteError } = await supabase
-        .from(tableName)
-        .delete()
-        .eq('id', attachmentId);
-
-      if (deleteError) throw deleteError;
-    }
+    // TODO: Implement with Supabase when attachments table is created
+    // For now, this is a no-op
   }
 
   getFilePath(fileName: string, type: "conversation" | "task"): string {

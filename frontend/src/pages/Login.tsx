@@ -22,22 +22,12 @@ export default function Login() {
 
       if (authError) throw authError;
 
-      if (data.session && data.user) {
-        // Fetch user details from the users table to get the name
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('id, email, name')
-          .eq('id', data.user.id)
-          .single();
-
-        if (userError) {
-          console.error('Failed to fetch user details:', userError);
-        }
-
+      if (data.session) {
         // Store session info so your Backend can verify it
         localStorage.setItem('token', data.session.access_token);
-        // Store the full user info including name from the users table
-        localStorage.setItem('user', JSON.stringify(userData || data.user));
+        localStorage.setItem('refreshToken', data.session.refresh_token || '');
+        localStorage.setItem('tokenExpiresAt', (Date.now() + (data.session.expires_in || 3600) * 1000).toString());
+        localStorage.setItem('user', JSON.stringify(data.user));
         
         // Use window.location to force a hard refresh into the dashboard
         window.location.href = '/dashboard';
@@ -68,33 +58,27 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Email
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               placeholder="you@example.com"
             />
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Password
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               placeholder="••••••••"
             />
           </div>
-
           <button
             type="submit"
             disabled={loading}
@@ -105,10 +89,7 @@ export default function Login() {
         </form>
 
         <p className="text-center text-gray-600 mt-6">
-          Don't have an account?{' '}
-          <Link to="/register" className="text-blue-600 hover:underline">
-            Sign up
-          </Link>
+          Don't have an account? <Link to="/register" className="text-blue-600 hover:underline">Sign up</Link>
         </p>
       </div>
     </div>

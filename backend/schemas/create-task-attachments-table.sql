@@ -9,8 +9,7 @@ CREATE TABLE IF NOT EXISTS task_attachments (
     file_path TEXT NOT NULL,
     file_type VARCHAR(100) NOT NULL,
     file_size INTEGER NOT NULL,
-    mime_type VARCHAR(100),:3000/api/teams/478f473f-37a3-43bc-8aab-2ab80dad9c98/tasks/aa4269ca-8b2d-49aa-9184-ac3c7457abdc/versions:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)Understand this error
-:3000/api/teams/478f473f-37a3-43bc-8aab-2ab80dad9c98/tasks/aa4269ca-8b2d-49aa-9184-ac3c7457abdc/versions:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)
+    mime_type VARCHAR(100),
     uploaded_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     uploaded_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),

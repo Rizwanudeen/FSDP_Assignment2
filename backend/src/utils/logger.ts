@@ -63,7 +63,7 @@ const logger = winston.createLogger({
 });
 
 // Optional: integrate with morgan (HTTP request logger)
-logger.stream = {
+(logger as any).stream = {
   write(message: string) {
     logger.http(message.trim());
   },

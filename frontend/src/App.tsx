@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Router } from 'react-router-dom';
 import { startTransition } from 'react';
+import TutorialModal from './components/TutorialModal';
 
 // Configure future flags
 const router = {
@@ -12,6 +13,9 @@ const router = {
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import Feedback from './pages/Feedback';
+import AdminFeedback from './pages/AdminFeedback';
+import Profile from './pages/Profile';
 import AgentDetails from './pages/AgentDetails';
 import AgentBuilder from './pages/AgentBuilder';
 import Conversation from './pages/Conversation';
@@ -25,9 +29,10 @@ import TaskResults from './pages/TaskResults';
 import SearchPage from './pages/SearchPage';
 import RequestsPage from './pages/RequestsPage';
 import UserResourcesPage from './pages/UserResourcesPage';
+import FeedbackDetail from './pages/FeedbackDetail';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -36,10 +41,10 @@ function App() {
     setIsLoading(false);
   }, []);
 
-  if (isLoading) {
+  if (isAuthenticated === null) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-xl text-gray-600">Loading...</div>
+        <div className="text-xl text-gray-600">Checking login status...</div>
       </div>
     );
   }
@@ -59,6 +64,33 @@ function App() {
           path="/dashboard" 
           element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />} 
         />
+        <Route
+          path="/feedback"
+          element={isAuthenticated ? <Feedback /> : <Navigate to="/login" />}
+        />
+
+        <Route 
+          path="/admin-feedback" 
+          element={<AdminFeedback />} 
+        /> 
+
+
+        <Route 
+          path="/profile"
+          element={isAuthenticated ? <Profile /> : <Navigate to="/login" />}
+        />
+
+        <Route 
+          path="/feedback-detail/:id" 
+          element={<FeedbackDetail />} 
+        />
+
+        <Route 
+          path="/feedback/:id" 
+          element={<FeedbackDetail />} 
+        />
+
+
         <Route 
           path="/agents/:id" 
           element={isAuthenticated ? <AgentDetails /> : <Navigate to="/login" />} 
@@ -133,6 +165,7 @@ function App() {
           }
         />
       </Routes>
+      <TutorialModal />
     </BrowserRouter>
   );
 }

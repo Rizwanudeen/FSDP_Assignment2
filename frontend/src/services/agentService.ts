@@ -1,4 +1,5 @@
 import api from './api';
+import { ensureValidToken } from './tokenRefresh';
 
 type Agent = any;
 
@@ -47,7 +48,7 @@ async function chatStream(
 ) {
 	try {
 		// Use fetch so we can stream the response body
-		const token = localStorage.getItem('token');
+		const token = await ensureValidToken();
 
 		const base = ((import.meta as any).env?.VITE_API_URL as string) || '/api';
 		const res = await fetch(`${base}/agents/${id}/chat`, {
@@ -119,6 +120,7 @@ async function chatStream(
 									out = JSON.stringify(parsed.text);
 								}
 							} else {
+								// Pass through other objects (like {token}, {conversationId}) as JSON strings
 								out = JSON.stringify(parsed);
 							}
 							onMessage?.(out);
@@ -152,6 +154,7 @@ async function chatStream(
 							else if (parsed.text?.content) out = String(parsed.text.content);
 							else out = JSON.stringify(parsed.text);
 						} else {
+							// Pass through other objects (like {token}, {conversationId}) as JSON strings
 							out = JSON.stringify(parsed);
 						}
 						onMessage?.(out);
@@ -177,6 +180,56 @@ export const agentService = {
 	deleteAgent,
 	testAgent,
 	chatStream,
+	createCrossReply,
+	getCrossReplies,
+	getCrossReplyById,
+	addAgentResponse,
+	deleteCrossReply,
 };
+
+/**
+ * Create a cross-agent reply session
+ * Takes a message the user liked and wants other agents to answer
+ */
+async function createCrossReply(payload: any): Promise<any> {
+	const res = await api.post('/agents/cross-replies', payload);
+	return res.data.data;
+}
+
+/**
+ * Get all cross-reply sessions for the user
+ */
+async function getCrossReplies(): Promise<any[]> {
+	const res = await api.get('/agents/cross-replies');
+	return res.data.data;
+}
+
+/**
+ * Get a specific cross-reply session with all responses
+ */
+async function getCrossReplyById(crossReplyId: string): Promise<any> {
+	const res = await api.get(`/agents/cross-replies/${crossReplyId}`);
+	return res.data.data;
+}
+
+/**
+ * Add an agent's response to a cross-reply session
+ * Called after an agent has answered the question
+ */
+async function addAgentResponse(
+	crossReplyId: string,
+	payload: { agentId: string; conversationId: string; responseMessageId: string }
+): Promise<any> {
+	const res = await api.post(`/agents/cross-replies/${crossReplyId}/responses`, payload);
+	return res.data.data;
+}
+
+/**
+ * Delete a cross-reply session
+ */
+async function deleteCrossReply(crossReplyId: string): Promise<boolean> {
+	const res = await api.delete(`/agents/cross-replies/${crossReplyId}`);
+	return res.data.success === true;
+}
 
 export default agentService;

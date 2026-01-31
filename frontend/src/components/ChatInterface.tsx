@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, X, Bot } from 'lucide-react';
+import { AlertCircle, X, Bot, Volume2, Square } from 'lucide-react';
 import { agentService } from '../services/agentService';
 import { conversationService } from '../services/conversationService';
 import api from '../services/api';
 import { Agent } from '../types';
+import { SaveResponseButton } from './SaveResponseButton';
+import { useTextToSpeech } from '../hooks/useTextToSpeech';
+import '../styles/saveResponseButton.css';
 import FileUpload, { FilePreview } from './FileUpload';
 
 type Message = {
@@ -30,6 +33,9 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 	const [showStatusWarning, setShowStatusWarning] = useState(false);
 	const [selectedFiles, setSelectedFiles] = useState<FilePreview[]>([]);
 
+	// Text-to-speech hook
+	const { speak, stop, isSpeaking, currentMessageId } = useTextToSpeech();
+
 	// Fetch agent details to check status
 	const { data: agent } = useQuery<Agent>({
 		queryKey: ['agent', agentId],
@@ -38,6 +44,15 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 			return response.data.data;
 		},
 		enabled: !!agentId,
+	});
+
+	// Fetch all agents for SaveResponseButton dropdown
+	const { data: allAgents = [] } = useQuery<Agent[]>({
+		queryKey: ['agents'],
+		queryFn: async () => {
+			const response = await api.get('/agents');
+			return response.data.data || [];
+		},
 	});
 
 	const isAgentAvailable = agent?.status === 'ACTIVE' || agent?.status === 'TRAINING';
@@ -296,11 +311,9 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 					assistantBufferRef.current = '';
 
 					// Refetch conversation to get proper IDs from database
-					// Use newConversationId if available (first message), otherwise currentConversationId
-					const conversationToRefetch = newConversationId || currentConversationId;
-					if (conversationToRefetch) {
+					if (currentConversationId) {
 						try {
-							const res = await api.get(`/conversations/${conversationToRefetch}`);
+							const res = await api.get(`/conversations/${currentConversationId}`);
 							if (res.data?.success) {
 								const msgs = res.data.data.messages || [];
 								setMessages(
@@ -411,6 +424,17 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 							<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
 						</button>
 						<button 
+							onClick={() => isSpeaking && currentMessageId === msg.id ? stop() : speak(msg.content, msg.id)}
+							className={`p-1 rounded transition-all ${isSpeaking && currentMessageId === msg.id ? 'bg-blue-100' : 'hover:bg-gray-100'}`}
+							title={isSpeaking && currentMessageId === msg.id ? 'Stop speaking' : 'Read aloud'}
+						>
+							{isSpeaking && currentMessageId === msg.id ? (
+								<Square className="h-4 w-4 text-blue-600 fill-blue-600" />
+							) : (
+								<Volume2 className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+							)}
+						</button>
+						<button 
 							onClick={() => handleFeedback(msg.id, 'like')} 
 							className={`p-1 rounded transition-all ${msg.feedback === 'like' ? 'bg-green-100' : 'hover:bg-gray-100'}`}
 						>
@@ -430,6 +454,14 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 								className={`h-4 w-4 ${msg.feedback === 'dislike' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
 							/>
 						</button>
+						<SaveResponseButton
+							messageId={msg.id}
+							messageContent={msg.content}
+							currentAgentId={agentId}
+							currentConversationId={currentConversationId || ''}
+							allAgents={allAgents.map(a => ({ id: a.id, name: a.name }))}
+							questionText={messages.find(m => m.role === 'user' && messages.indexOf(m) < messages.indexOf(msg))?.content || 'User Query'}
+						/>
 					</div>
 				)}
 			</div>

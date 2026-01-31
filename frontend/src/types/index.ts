@@ -39,3 +39,59 @@ export interface AuthResponse {
   };
   message: string;
 }
+
+export interface TutorialStep {
+  id: string;
+  title: string;
+  description: string;
+  detailedInstructions: string[];
+  elementId?: string; // ID of DOM element to highlight
+  action?: string; // What action to take (e.g., 'click', 'scroll')
+  image?: string; // Optional image/GIF showing the step
+}
+
+export interface TutorialState {
+  showTutorial: boolean;
+  currentStep: number;
+  isCompleted: boolean;
+  hasSeenBefore: boolean;
+}
+
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  documentCount: number;
+  chunkCount: number;
+}
+
+export interface Document {
+  id: string;
+  filename: string;
+  fileType: string;
+  fileSize: number;
+  uploadedAt: string;
+  isProcessed: boolean;
+  chunkCount: number;
+}
+
+export interface SearchResult {
+  id: string;
+  text: string;
+  filename: string;
+  similarity: number;
+}
+
+export interface KBStats {
+  id: string;
+  name: string;
+  description?: string;
+  documentCount: number;
+  chunkCount: number;
+  totalSize: number;
+  totalSearches: number;
+  uniqueSearchers: number;
+}

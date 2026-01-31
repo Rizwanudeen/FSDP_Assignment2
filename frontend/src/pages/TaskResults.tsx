@@ -78,23 +78,21 @@ export default function TaskResults() {
 
       // Upload files if any
       if (versionFiles.length > 0) {
-        for (const file of versionFiles) {
-          const formData = new FormData();
-          formData.append('file', file);
-          await api.post(`/uploads/tasks/${newTask.id}`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-        }
+        const formData = new FormData();
+        versionFiles.forEach((file) => formData.append('files', file));
+        await api.post(`/uploads/tasks/${newTask.id}`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
       }
 
       return newTask;
     },
     onSuccess: (newTask) => {
       queryClient.invalidateQueries({ queryKey: ['task', teamId, taskId] });
+      setShowVersionModal(false);
       setVersionTitle('');
       setVersionDescription('');
       setVersionFiles([]);
-      setShowVersionModal(false);
       // Navigate to the new version
       navigate(`/teams/${teamId}/tasks/${newTask.id}`);
     },
@@ -281,10 +279,10 @@ export default function TaskResults() {
                   <Target className="h-5 w-5" />
                   Task Details
                 </h2>
-                {task.versionNumber && (
+                {(task as any).versionNumber && (
                   <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold flex items-center gap-1">
                     <GitBranch className="h-3 w-3" />
-                    v{task.versionNumber}
+                    v{(task as any).versionNumber}
                   </span>
                 )}
               </div>
