@@ -252,9 +252,20 @@ class AgentService {
       // 4️⃣ Save user message (only if not already created)
       let userMessageId: string;
       if (skipUserMessage) {
-        // Message already exists, find the last user message
-        const lastUserMsg = historyRows?.filter((m: any) => m.role === 'user').pop();
+        // Message already exists, refetch to ensure we have the latest
+        const { data: refreshedHistory, error: refreshError } = await supabase
+          .from('messages')
+          .select('id, role, content')
+          .eq('conversation_id', convId)
+          .order('created_at', { ascending: true });
+        
+        if (refreshError) throw refreshError;
+        
+        // Find the last user message
+        const lastUserMsg = refreshedHistory?.filter((m: any) => m.role === 'user').pop();
         userMessageId = lastUserMsg?.id || crypto.randomUUID();
+        
+        logger.info(`Using existing message ID: ${userMessageId}`);
       } else {
         userMessageId = crypto.randomUUID();
         const { error: msgError } = await supabase

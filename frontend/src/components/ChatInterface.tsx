@@ -311,9 +311,10 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 					assistantBufferRef.current = '';
 
 					// Refetch conversation to get proper IDs from database
-					if (currentConversationId) {
+					const convIdToFetch = newConversationId || currentConversationId;
+					if (convIdToFetch) {
 						try {
-							const res = await api.get(`/conversations/${currentConversationId}`);
+							const res = await api.get(`/conversations/${convIdToFetch}`);
 							if (res.data?.success) {
 								const msgs = res.data.data.messages || [];
 								setMessages(
