@@ -34,27 +34,6 @@ class AgentService {
   };
 
   /**
-   * GET AGENT BY ID
-   */
-  getAgentById = async (agentId: string, userId: string) => {
-    const { data, error } = await supabase
-      .from('agents')
-      .select('*')
-      .eq('id', agentId)
-      .eq('user_id', userId)
-      .single();
-    
-    if (error) {
-      // Only log if it's not a "not found" error
-      if (error.code !== 'PGRST116') {
-        logger.error('Error fetching agent:', error);
-      }
-      return null;
-    }
-    return data;
-  };
-
-  /**
    * CREATE AGENT
    */
   createAgent = async (userId: string, data: any) => {
