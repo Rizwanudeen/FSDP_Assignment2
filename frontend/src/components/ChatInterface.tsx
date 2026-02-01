@@ -311,9 +311,10 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 					assistantBufferRef.current = '';
 
 					// Refetch conversation to get proper IDs from database
-					if (currentConversationId) {
+					const convIdToFetch = newConversationId || currentConversationId;
+					if (convIdToFetch) {
 						try {
-							const res = await api.get(`/conversations/${currentConversationId}`);
+							const res = await api.get(`/conversations/${convIdToFetch}`);
 							if (res.data?.success) {
 								const msgs = res.data.data.messages || [];
 								setMessages(
@@ -454,14 +455,6 @@ export default function ChatInterface({ agentId, conversationId, onConversationC
 								className={`h-4 w-4 ${msg.feedback === 'dislike' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
 							/>
 						</button>
-						<SaveResponseButton
-							messageId={msg.id}
-							messageContent={msg.content}
-							currentAgentId={agentId}
-							currentConversationId={currentConversationId || ''}
-							allAgents={allAgents.map(a => ({ id: a.id, name: a.name }))}
-							questionText={messages.find(m => m.role === 'user' && messages.indexOf(m) < messages.indexOf(msg))?.content || 'User Query'}
-						/>
 						<SaveResponseButton
 							messageId={msg.id}
 							messageContent={msg.content}

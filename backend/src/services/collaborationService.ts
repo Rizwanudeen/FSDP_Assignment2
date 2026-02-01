@@ -327,30 +327,32 @@ Respond with ONLY valid JSON array, no other text.`;
 
       if (attachments && attachments.length > 0) {
         for (const att of attachments) {
-          const isImage = att.fileType?.startsWith('image/');
+          // Use snake_case column names from Supabase
+          logger.info(`Processing attachment: ${att.original_file_name}, fileType: ${att.file_type}`);
+          const isImage = att.file_type?.startsWith('image/');
           
           if (isImage) {
             try {
-              // filePath from DB is already absolute, don't join with cwd
-              const fullPath = att.filePath;
+              // file_path from DB is already absolute
+              const fullPath = att.file_path;
               logger.info(`Attempting to read image from: ${fullPath}`);
               if (fs.existsSync(fullPath)) {
                 const buffer = fs.readFileSync(fullPath);
                 const base64 = buffer.toString('base64');
                 imageAttachments.push({
-                  filename: att.originalFileName,
+                  filename: att.original_file_name,
                   base64,
-                  mimeType: att.fileType
+                  mimeType: att.file_type
                 });
-                logger.info(`Successfully loaded image: ${att.originalFileName}`);
+                logger.info(`Successfully loaded image: ${att.original_file_name}`);
               } else {
                 logger.warn(`Image file not found: ${fullPath}`);
               }
             } catch (err) {
-              logger.warn(`Failed to read image ${att.originalFileName}:`, err);
+              logger.warn(`Failed to read image ${att.original_file_name}:`, err);
             }
           } else {
-            documentAttachments.push(`${att.originalFileName} (${att.fileType})`);
+            documentAttachments.push(`${att.original_file_name} (${att.file_type})`);
           }
         }
       }
@@ -809,30 +811,41 @@ Provide the final synthesized result:`;
     const isOwner = team.user_id === userId;
 
     if (!isOwner) {
-      // Check for shared access
-      const { data: ownerAgents } = await supabase
-        .from('agents')
+      // Check for shared team access in resource_access table
+      const { data: teamAccess } = await supabase
+        .from('resource_access')
         .select('id')
-        .eq('user_id', team.user_id);
+        .eq('resource_type', 'team')
+        .eq('resource_id', teamId)
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (ownerAgents && ownerAgents.length > 0) {
-        const agentIds = ownerAgents.map(a => a.id);
-        
-        const { data: sharedAccess } = await supabase
-          .from('share_requests')
+      if (!teamAccess) {
+        // Also check for shared agent access (old logic)
+        const { data: ownerAgents } = await supabase
+          .from('agents')
           .select('id')
-          .eq('resource_type', 'agent')
-          .in('resource_id', agentIds)
-          .eq('requester_user_id', userId)
-          .eq('status', 'approved')
-          .limit(1)
-          .maybeSingle();
+          .eq('user_id', team.user_id);
 
-        if (!sharedAccess) {
+        if (ownerAgents && ownerAgents.length > 0) {
+          const agentIds = ownerAgents.map(a => a.id);
+          
+          const { data: sharedAccess } = await supabase
+            .from('share_requests')
+            .select('id')
+            .eq('resource_type', 'agent')
+            .in('resource_id', agentIds)
+            .eq('requester_user_id', userId)
+            .eq('status', 'approved')
+            .limit(1)
+            .maybeSingle();
+
+          if (!sharedAccess) {
+            throw new Error("Team not found");
+          }
+        } else {
           throw new Error("Team not found");
         }
-      } else {
-        throw new Error("Team not found");
       }
     }
   }

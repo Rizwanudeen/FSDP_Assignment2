@@ -8,160 +8,48 @@ import { logger } from "../utils/logger";
 import { openaiStream, openaiChat, AIMessage } from "./openaiService";
 
 class AgentService {
-  /**
-   * GET ALL AGENTS
-   */
-  getAllAgents = async (userId: string) => {
+  // Helper functions for parsing JSON fields from database
+  private parseJsonField(raw: any, fallback: any = {}) {
+    if (!raw) return fallback;
+    if (typeof raw === "object") return raw;
     try {
-      logger.info('📋 Fetching agents for user:', userId);
-      const { data, error } = await supabase
-        .from('agents')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        logger.error('❌ Error fetching agents:', error);
-        throw error;
-      }
-      
-      logger.info('✅ Found', data?.length || 0, 'agents');
-      return data || [];
-    } catch (err: any) {
-      logger.error('❌ getAllAgents exception:', err.message || err);
-      throw err;
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
     }
-  };
+  }
+
+  private parseCapabilities(raw: any) {
+    return this.parseJsonField(raw, []);
+  }
+
+  private parseConfig(raw: any) {
+    return this.parseJsonField(raw, {});
+  }
+
+  private parseMetrics(raw: any) {
+    return this.parseJsonField(raw, {
+      totalInteractions: 0,
+      successRate: 0,
+      avgResponseTime: 0,
+    });
+  }
 
   /**
-   * GET AGENT BY ID
+   * GET ALL AGENTS - REMOVED (using async function version below instead)
    */
-  getAgentById = async (agentId: string, userId: string) => {
-    const { data, error } = await supabase
-      .from('agents')
-      .select('*')
-      .eq('id', agentId)
-      .eq('user_id', userId)
-      .single();
-    
-    if (error) {
-      logger.error('Error fetching agent:', error);
-      return null;
-    }
-    return data;
-  };
 
   /**
-   * CREATE AGENT
+   * CREATE AGENT - REMOVED (using async function version below instead)
    */
-  createAgent = async (userId: string, data: any) => {
-    logger.info('Creating agent for user:', userId);
-    
-    // Ensure user exists in public.users table (fixes RLS foreign key issue)
-    try {
-      const { data: existingUser, error: checkError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('id', userId)
-        .single();
-
-      if (checkError || !existingUser) {
-        logger.warn('User not in public.users table, attempting to create entry:', userId);
-        
-        // Try to get user from auth.users to get their email
-        const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
-        
-        if (!authError && authUser?.user) {
-          const { error: insertError } = await supabase
-            .from('users')
-            .insert({
-              id: userId,
-              email: authUser.user.email,
-              name: authUser.user.user_metadata?.full_name || authUser.user.email?.split("@")[0] || 'User',
-              password: '', // Empty password since auth is handled by Supabase
-            });
-
-          if (insertError) {
-            logger.warn('Failed to create user entry (might already exist):', insertError.message);
-            // Continue anyway - user might have been created by another request
-          } else {
-            logger.info('✅ User entry created in public.users:', userId);
-          }
-        }
-      }
-    } catch (err: any) {
-      logger.warn('Error ensuring user exists:', err.message);
-      // Continue anyway - agent creation might still work
-    }
-    
-    const { data: newAgent, error } = await supabase
-      .from('agents')
-      .insert({ 
-        name: data.name,
-        description: data.description,
-        type: data.type,
-        user_id: userId,
-        configuration: data.configuration || {"system_prompt": "You are a helpful assistant.", "model": "gpt-4o-mini"},
-        metrics: { totalInteractions: 0, successRate: 0, avgResponseTime: 0 },
-        status: data.status || 'ACTIVE',
-        capabilities: data.capabilities || []
-      })
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Agent creation error details:', error);
-      throw error;
-    }
-    return newAgent;
-  };
 
   /**
-   * UPDATE AGENT
+   * UPDATE AGENT - REMOVED (using async function version below instead)
    */
-  updateAgent = async (agentId: string, userId: string, updateData: any) => {
-    // Convert camelCase to snake_case for Supabase
-    const snakeCaseData: any = {};
-    
-    if (updateData.name !== undefined) snakeCaseData.name = updateData.name;
-    if (updateData.description !== undefined) snakeCaseData.description = updateData.description;
-    if (updateData.type !== undefined) snakeCaseData.type = updateData.type;
-    if (updateData.status !== undefined) snakeCaseData.status = updateData.status;
-    if (updateData.avatar !== undefined) snakeCaseData.avatar = updateData.avatar;
-    if (updateData.capabilities !== undefined) snakeCaseData.capabilities = updateData.capabilities;
-    if (updateData.configuration !== undefined) snakeCaseData.configuration = updateData.configuration;
-    if (updateData.metrics !== undefined) snakeCaseData.metrics = updateData.metrics;
-    
-    snakeCaseData.updated_at = new Date().toISOString();
-
-    const { data: updated, error } = await supabase
-      .from('agents')
-      .update(snakeCaseData)
-      .eq('id', agentId)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Update agent error:', error);
-      throw error;
-    }
-    return updated;
-  };
 
   /**
-   * DELETE AGENT
+   * DELETE AGENT - REMOVED (using async function version below instead)
    */
-  deleteAgent = async (agentId: string, userId: string) => {
-    const { error } = await supabase
-      .from('agents')
-      .delete()
-      .eq('id', agentId)
-      .eq('user_id', userId);
-
-    if (error) return null;
-    return { id: agentId };
-  };
 
   /**
    * TEST AGENT (Non-streaming)
@@ -243,9 +131,20 @@ class AgentService {
       // 4️⃣ Save user message (only if not already created)
       let userMessageId: string;
       if (skipUserMessage) {
-        // Message already exists, find the last user message
-        const lastUserMsg = historyRows?.filter((m: any) => m.role === 'user').pop();
+        // Message already exists, refetch to ensure we have the latest
+        const { data: refreshedHistory, error: refreshError } = await supabase
+          .from('messages')
+          .select('id, role, content')
+          .eq('conversation_id', convId)
+          .order('created_at', { ascending: true });
+        
+        if (refreshError) throw refreshError;
+        
+        // Find the last user message
+        const lastUserMsg = refreshedHistory?.filter((m: any) => m.role === 'user').pop();
         userMessageId = lastUserMsg?.id || crypto.randomUUID();
+        
+        logger.info(`Using existing message ID: ${userMessageId}`);
       } else {
         userMessageId = crypto.randomUUID();
         const { error: msgError } = await supabase

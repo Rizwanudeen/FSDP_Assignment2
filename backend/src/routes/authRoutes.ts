@@ -79,7 +79,7 @@ router.post("/register", async (req, res) => {
         user: {
           id: user?.id,
           email: user?.email,
-          name: user?.user_metadata?.full_name || name,
+          name: name || user?.user_metadata?.full_name || email.split("@")[0],
         },
         token: session?.access_token,
       },
@@ -123,12 +123,14 @@ router.post("/login", async (req, res) => {
     const user = data.user;
     const session = data.session;
 
-    // Ensure user exists in public.users table
+    // Ensure user exists in public.users table and get user name
+    let userName = user.user_metadata?.full_name || user.email?.split("@")[0];
+    
     if (user?.id) {
       try {
         const { data: existingUser, error: checkError } = await supabase
           .from('users')
-          .select('id')
+          .select('id, name')
           .eq('id', user.id)
           .single();
 
@@ -140,7 +142,7 @@ router.post("/login", async (req, res) => {
             .insert({
               id: user.id,
               email: user.email,
-              name: user.user_metadata?.full_name || user.email?.split("@")[0],
+              name: userName,
               password: "", // Empty password since auth is handled by Supabase
             });
 
@@ -148,6 +150,9 @@ router.post("/login", async (req, res) => {
             logger.error("Failed to create user on login:", insertError);
             // Continue anyway
           }
+        } else {
+          // Use the name from the database
+          userName = existingUser.name || userName;
         }
       } catch (err) {
         logger.error("Error checking/creating user on login:", err);
@@ -160,7 +165,7 @@ router.post("/login", async (req, res) => {
         user: {
           id: user.id,
           email: user.email,
-          name: user.user_metadata?.full_name || user.email?.split("@")[0],
+          name: userName,
         },
         token: session.access_token,
       },
@@ -247,6 +252,56 @@ router.post("/sync-users-from-auth", async (req, res) => {
   } catch (error) {
     logger.error("Sync users error:", error);
     res.status(500).json({ success: false, error: "Failed to sync users" });
+  }
+});
+
+/**
+ * GET /api/auth/me - Get current user info
+ */
+router.get("/me", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ success: false, error: "No token provided" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      return res.status(401).json({ success: false, error: "Invalid token" });
+    }
+
+    // Get user data from public.users table
+    const { data: userData, error: dbError } = await supabase
+      .from('users')
+      .select('id, email, name')
+      .eq('id', user.id)
+      .single();
+
+    if (dbError) {
+      logger.error("Failed to fetch user data:", dbError);
+      return res.json({
+        success: true,
+        data: {
+          id: user.id,
+          email: user.email,
+          name: user.user_metadata?.full_name || user.email?.split("@")[0],
+        },
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+      },
+    });
+  } catch (error) {
+    logger.error("Get user error:", error);
+    res.status(500).json({ success: false, error: "Failed to get user data" });
   }
 });
 
